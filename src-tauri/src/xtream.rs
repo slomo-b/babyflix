@@ -228,7 +228,7 @@ fn truthy(v: Option<&Value>) -> bool {
 
 pub fn build_url(base: &str, user: &str, pass: &str, action: Option<&str>, params: &[(&str, String)]) -> Result<String> {
     let mut url = reqwest::Url::parse(&format!("{base}/player_api.php"))
-        .map_err(|e| anyhow!("Ungültige Server-URL: {e}"))?;
+        .map_err(|e| anyhow!("Invalid server URL: {e}"))?;
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("username", user);
@@ -272,7 +272,7 @@ async fn try_login(
         .await
         .map_err(|e| AttemptError {
             reached: false,
-            msg: format!("nicht erreichbar ({e})"),
+            msg: format!("unreachable ({e})"),
         })?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
@@ -284,13 +284,13 @@ async fn try_login(
     };
     if !status.is_success() {
         let hint = match status.as_u16() {
-            401 => " (nicht autorisiert)",
-            403 => " (Zugriff verweigert – oft VPN-/Datacenter-IP oder Geo-Sperre)",
-            429 => " (zu viele Anfragen – bitte ~15 Min warten)",
-            444 => " (Verbindung ohne Antwort geschlossen – Client/IP gesperrt)",
-            511 => " (Netzwerk-Authentifizierung nötig – Captive Portal/VPN/Proxy)",
-            513 => " (nicht standardisiert – Panels/Proxies nutzen das als Blockade-Code)",
-            520 | 521 | 522 | 523 | 524 => " (CDN/Origin-Fehler)",
+            401 => " (unauthorized)",
+            403 => " (access denied - often VPN/datacenter IP or geo-block)",
+            429 => " (too many requests - please wait ~15 min)",
+            444 => " (connection closed without response - client/IP blocked)",
+            511 => " (network authentication required - captive portal/VPN/proxy)",
+            513 => " (non-standard - panels/proxies use this as a block code)",
+            520 | 521 | 522 | 523 | 524 => " (CDN/origin error)",
             _ => "",
         };
         return Err(AttemptError {
@@ -300,27 +300,27 @@ async fn try_login(
     }
     let v: Value = serde_json::from_str(&text).map_err(|_| AttemptError {
         reached: true,
-        msg: format!("keine gültige Xtream-Antwort (kein JSON){tail}"),
+        msg: format!("not a valid Xtream response (no JSON){tail}"),
     })?;
     let user_info = v.get("user_info").cloned().unwrap_or(Value::Null);
     if user_info.is_null() {
         return Err(AttemptError {
             reached: true,
-            msg: format!("Antwort ohne user_info{tail}"),
+            msg: format!("response without user_info{tail}"),
         });
     }
     let auth = loose_str(user_info.get("auth"));
     if auth.is_some() && auth.as_deref() != Some("1") {
         return Err(AttemptError {
             reached: true,
-            msg: "Zugangsdaten abgelehnt (auth != 1)".into(),
+            msg: "credentials rejected (auth != 1)".into(),
         });
     }
     if let Some(st) = loose_str(user_info.get("status")) {
         if !st.is_empty() && !st.eq_ignore_ascii_case("active") {
             return Err(AttemptError {
                 reached: true,
-                msg: format!("Konto nicht aktiv (Status: {st})"),
+                msg: format!("account not active (status: {st})"),
             });
         }
     }
@@ -385,8 +385,8 @@ pub async fn login(client: &reqwest::Client, creds: &Credentials) -> Result<Sess
     }
 
     Err(anyhow!(
-        "Login fehlgeschlagen. Alle Versuche:\n{}\n\nBitte Server-URL, Benutzer und Passwort prüfen. \
-Läuft der Server evtl. auf einem anderen Port oder nur über HTTPS?",
+        "Login failed. All attempts:\n{}\n\nPlease check the server URL, username and password. \
+Is the server maybe on a different port or only reachable over HTTPS?",
         attempts.join("\n")
     ))
 }
@@ -463,7 +463,7 @@ async fn api(
     if text.trim().is_empty() {
         return Ok(Value::Array(vec![]));
     }
-    serde_json::from_str(&text).map_err(|e| anyhow!("Antwort von '{action}' nicht lesbar: {e}"))
+    serde_json::from_str(&text).map_err(|e| anyhow!("Response from '{action}' not readable: {e}"))
 }
 
 pub async fn categories(client: &reqwest::Client, session: &Session, kind: &str) -> Result<Vec<Category>> {

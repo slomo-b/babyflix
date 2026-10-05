@@ -77,7 +77,7 @@ async fn login(State(app): State<Arc<App>>, Json(req): Json<LoginReq>) -> ApiRes
     let username = req.username.trim().to_string();
     let password = req.password.trim().to_string();
     if username.is_empty() || password.is_empty() {
-        return Err(ApiError("Benutzername und Passwort erforderlich.".into()));
+        return Err(ApiError("Username and password required.".into()));
     }
     let creds = Credentials {
         base_url: xtream::normalize_base(&req.base_url),
@@ -142,7 +142,7 @@ struct M3uReq {
 async fn login_m3u(State(app): State<Arc<App>>, Json(req): Json<M3uReq>) -> ApiResult {
     let url = req.url.trim().to_string();
     if url.is_empty() {
-        return Err(ApiError("M3U-URL erforderlich.".into()));
+        return Err(ApiError("M3U URL required.".into()));
     }
     app.login_m3u(&url).await?;
     app.ensure_ratings();
@@ -170,7 +170,7 @@ async fn categories(State(app): State<Arc<App>>, Query(q): Query<KindQ>) -> ApiR
         let cats = m3u::categories_from(items.as_slice());
         return Ok(Json(json!({ "categories": cats })));
     }
-    let s = app.session().await.ok_or(ApiError("Nicht angemeldet.".into()))?;
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     let cats = xtream::categories(&app.client, &s, &q.kind).await?;
     Ok(Json(json!({ "categories": cats })))
 }
@@ -305,7 +305,7 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
     if app.is_m3u().await {
         return m3u_detail(&app, &q).await;
     }
-    let s = app.session().await.ok_or(ApiError("Nicht angemeldet.".into()))?;
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     let mut md = if q.kind == "series" {
         xtream::series_detail(&app.client, &s, &q.id).await?
     } else {
@@ -344,7 +344,7 @@ async fn m3u_detail(app: &Arc<App>, q: &DetailQ) -> Result<Json<Value>, ApiError
     let item = app
         .find_item(&q.id)
         .await
-        .ok_or(ApiError("Eintrag nicht gefunden.".into()))?;
+        .ok_or(ApiError("Item not found.".into()))?;
     let kind = if item.kind == "series" { "series" } else { "movie" };
     let imdb = app.imdb_enrich(&item.name, None, kind).await;
 
@@ -406,7 +406,7 @@ struct EpgQ {
 }
 
 async fn epg(State(app): State<Arc<App>>, Query(q): Query<EpgQ>) -> ApiResult {
-    let s = app.session().await.ok_or(ApiError("Nicht angemeldet.".into()))?;
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     let full = q.full.unwrap_or(false);
     let mut list = if full {
         xtream::full_epg(&app.client, &s, &q.stream_id).await?
@@ -510,16 +510,16 @@ async fn player(
     Query(q): Query<PlayerQ>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let s = app.session().await.ok_or(ApiError("Nicht angemeldet.".into()))?;
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     let url = if s.source == "m3u" {
         let item = app
             .find_item(&q.id)
             .await
-            .ok_or(ApiError("Eintrag nicht gefunden.".into()))?;
+            .ok_or(ApiError("Item not found.".into()))?;
         let raw = item
             .url
             .clone()
-            .ok_or(ApiError("Für diesen Eintrag ist keine Stream-URL vorhanden.".into()))?;
+            .ok_or(ApiError("No stream URL available for this item.".into()))?;
         m3u::hls_candidate(&app.client, &raw, &item.kind, &s.ua)
             .await
             .unwrap_or(raw)

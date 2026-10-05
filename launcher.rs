@@ -24,7 +24,7 @@ fn port_open(port: u16) -> bool {
 
 fn pause(msg: &str) {
     println!("\n{msg}");
-    println!("Zum Schliessen Enter druecken...");
+    println!("Press Enter to close...");
     let mut buf = String::new();
     let _ = std::io::stdin().read_to_string(&mut buf);
 }
@@ -39,29 +39,29 @@ fn main() {
     println!("==============================================");
     println!("  BabyFlix - Dev Launcher (Hot Reload)");
     println!("==============================================");
-    println!("Projektordner: {}", dir.display());
+    println!("Project folder: {}", dir.display());
     println!();
 
     if !dir.join("package.json").exists() {
-        pause("FEHLER: package.json nicht gefunden. Bitte die .exe in den BabyFlix-Projektordner legen.");
+        pause("ERROR: package.json not found. Please place the .exe in the BabyFlix project folder.");
         return;
     }
 
     if port_open(API_PORT) {
-        println!("BabyFlix laeuft bereits (Backend auf Port {API_PORT}).");
-        pause("Nichts zu tun.");
+        println!("BabyFlix is already running (backend on port {API_PORT}).");
+        pause("Nothing to do.");
         return;
     }
 
     if port_open(DEV_PORT) {
-        println!("Hinweis: Port {DEV_PORT} (Vite) ist belegt - evtl. eine alte Instanz.");
-        println!("Falls der Start fehlschlaegt: alte node-Prozesse beenden und erneut versuchen.");
+        println!("Note: port {DEV_PORT} (Vite) is in use - possibly a stale instance.");
+        println!("If the start fails: kill old node processes and try again.");
     }
 
-    println!("Starte Vite-HMR + Tauri (Rust). Erststart kann einige Minuten dauern...");
-    println!("  Frontend-Aenderungen  -> sofortiges Hot Reload");
-    println!("  Backend-Aenderungen   -> automatischer Rebuild + Neustart");
-    println!("Zum Beenden: BabyFlix-Fenster schliessen (oder hier Strg+C).");
+    println!("Starting Vite HMR + Tauri (Rust). The first start can take a few minutes...");
+    println!("  Frontend changes -> instant hot reload");
+    println!("  Backend changes  -> automatic rebuild + restart");
+    println!("To stop: close the BabyFlix window (or press Ctrl+C here).");
     println!();
 
     let status = Command::new("cmd")
@@ -70,10 +70,10 @@ fn main() {
         .status();
 
     match status {
-        Ok(s) if s.success() => pause("Dev-Session beendet."),
-        Ok(s) => pause(&format!("Dev-Session beendet mit Status {s}.")),
+        Ok(s) if s.success() => pause("Dev session ended."),
+        Ok(s) => pause(&format!("Dev session ended with status {s}.")),
         Err(e) => pause(&format!(
-            "FEHLER beim Starten: {e}\nIst Node.js/npm installiert und im PATH?"
+            "ERROR while starting: {e}\nIs Node.js/npm installed and on PATH?"
         )),
     }
 }

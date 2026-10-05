@@ -1,92 +1,159 @@
 # BabyFlix
 
-Eine **Plex-artige Desktop-Streaming-App** für Filme, Serien und Live-TV – gebaut auf der
-**Xtream Codes API** (dein eigener IPTV-Zugang) mit **automatischen Covern** und **echten
-IMDb-Bewertungen**. Läuft als native Windows-Desktop-App (**Tauri 2 + React + Rust**).
+A **Plex-like desktop streaming app** for movies, series and live TV, built on the
+**Xtream Codes API** (your own IPTV access) with **automatic posters** and **real IMDb ratings**.
+Runs as a native desktop app (**Tauri 2 + React + Rust**) on Windows, macOS and Linux.
 
-> BabyFlix stellt **keine** Inhalte bereit. Du nutzt deinen eigenen, autorisierten Xtream-Zugang.
+> BabyFlix provides **no content**. You use your own authorized IPTV access.
 
 ---
 
 ## Features
 
-- 🎬 **Filme / Serien / Live-TV** mit Kategorien, Suche und Sortierung
-- 🖼️ **Automatische Cover** – aus deinem Panel und (keyless) von IMDb
-- ⭐ **Echte IMDb-Bewertungen + Stimmen** – komplett **ohne API-Key**
-- ▶️ **HLS/TSt-Player** (hls.js) mit Fullscreen, Spulen, Lautstärke, Tastenkürzeln
-- 📺 **Live-TV** mit Sender-Logos und **EPG** („Jetzt / Danach“)
-- 📚 **Serien** mit Staffeln und Episoden, Autoplay der nächsten Folge
-- ⏱️ **Weiterschauen** (Fortschritt wird lokal gespeichert)
-- 🎨 Dunkles Premium-UI mit Hero-Banner, Hover-Effekten, Skeletons
+- 🎬 **Movies / Series / Live TV** with categories, search and sorting
+- 🖼️ **Automatic posters** — from your panel and (key-free) from IMDb
+- ⭐ **Real IMDb ratings + vote counts** — completely **without an API key**
+- ▶️ **HLS/TS player** (hls.js) with fullscreen, seeking, volume and keyboard shortcuts
+- 📺 **Live TV** with channel logos and **EPG** (now / next)
+- 📚 **Series** with seasons and episodes, autoplay of the next episode
+- ⏱️ **Continue watching** (progress stored locally)
+- 🌍 **German / English** UI with a language switch
+- 🔄 **Automatic updates** from GitHub Releases (Tauri updater)
+- 🔐 **Remembered sign-in** (only cleared when you remove the account)
+- 🎨 Dark premium UI with hero banner, hover effects and skeletons
 
-## So funktioniert die Keyless-Metadaten-Anreicherung
+## How the key-free metadata enrichment works
 
-1. **Cover** kommen primär direkt vom Xtream-Panel (`stream_icon`, `movie_image`, `cover`).
-2. **Titel → IMDb-ID** über die öffentliche IMDb-Suggestion-API (kein Key, kein WAF).
-3. **IMDb-Rating + Anzahl Stimmen** aus dem offiziellen IMDb-Dataset
-   `title.ratings.tsv.gz` – wird einmalig geladen und als kompakter Index gecacht.
-4. Zusätzlich: IMDb-Poster und Top-Cast aus der Suggestion-API.
+1. **Posters** come primarily from the Xtream panel (`stream_icon`, `movie_image`, `cover`).
+2. **Title → IMDb id** via the public IMDb suggestion API (no key, no WAF).
+3. **IMDb rating + votes** from the official IMDb dataset `title.ratings.tsv.gz` — downloaded
+   once and cached as a compact local index.
+4. Plus IMDb poster and top cast from the suggestion API.
 
-Alles wird lokal aggressiv gecacht. Es wird **kein** API-Key benötigt.
+Everything is cached aggressively on disk. **No API key is required.**
 
 ---
 
-## Starten (Entwicklung)
+## Getting started (development)
 
-```powershell
+```bash
 npm install
 npm run tauri dev
 ```
 
-Beim ersten Start werden die Rust-Abhängigkeiten kompiliert (dauert einige Minuten) und die
-IMDb-Daten einmalig heruntergeladen (~9 MB).
+The first run compiles the Rust dependencies (takes a few minutes) and downloads the IMDb
+dataset once (~9 MB).
 
-### Dev-Launcher als `.exe` (mit Hot Reload) — `BabyFlix-Dev.exe`
+### Dev launcher as an `.exe` (with hot reload) — `BabyFlix-Dev.exe`
 
-Für den Doppelklick-Workflow liegt im Projektordner eine kleine native Windows-`.exe`, die den
-kompletten Dev-Stack startet:
+For a double-click workflow there is a small native Windows `.exe` in the project folder that
+starts the whole dev stack:
 
-- **Vite dev server** → Hot Module Replacement (HMR) für das React-Frontend
-- **`tauri dev`** → überwacht das Rust-Backend und baut/startet bei Änderungen automatisch neu
+- **Vite dev server** → Hot Module Replacement (HMR) for the React frontend
+- **`tauri dev`** → watches the Rust backend and rebuilds/restarts on change
 
-Einfach **`BabyFlix-Dev.exe`** doppelklicken. Sie ermittelt den Projektordner selbst (Ordner der
-`.exe`), erkennt bereits laufende Instanzen und hält offene Ausgaben in `dev.out.log` /
+Just double-click **`BabyFlix-Dev.exe`**. It locates the project folder itself (the folder the
+`.exe` lives in), detects already-running instances and keeps output in `dev.out.log` /
 `dev.err.log`.
 
-Neu bauen (falls sich der Launcher ändert):
+Rebuild the launcher (if `launcher.rs` changes):
 
 ```powershell
 rustc -O launcher.rs -o BabyFlix-Dev.exe
 ```
 
-> Hinweis: Der Dev-Build lädt die App aus dem Vite-Dev-Server (deshalb HMR). Er ist **nicht**
-> als eigenständige Einzeldatei nutzbar. Für eine eigenständige `.exe` ohne Dev-Server:
-> `npm run tauri build` (Release, kein Hot Reload).
+> Note: the dev build loads the app from the Vite dev server (that is what enables HMR). It is
+> **not** usable as a standalone single file. For a standalone `.exe` without the dev server
+> run `npm run tauri build` (release, no hot reload).
 
-## Installer / Builds
+## Using the app
 
-BabyFlix ist für **Windows, macOS und Linux** vorbereitet.
-Wichtig: Ein **macOS-Build ist von Windows aus nicht möglich** – er entsteht auf einem Mac oder
-über die mitgelieferte **GitHub-Actions-CI** (`.github/workflows/build.yml`).
+There are **two login modes** (switch at the top of the form):
+
+**A) Xtream Codes** (JSON API)
+1. Enter your Xtream panel **server URL** (e.g. `http://server.tv:8080`).
+2. Enter **username** and **password** → *Sign in*.
+3. The library loads; posters/IMDb ratings are enriched automatically.
+
+**B) M3U playlist** (fallback)
+1. Pick the **M3U playlist** tab.
+2. Paste the **full playlist URL**, e.g.
+   `http://server:8080/get.php?username=USER&password=PASS&type=m3u_plus&output=hls`.
+3. *Sign in* → BabyFlix parses channels, movies and series from the playlist.
+   `output=hls` yields playable streams (`.m3u8`); for `.ts` links BabyFlix tries the
+   HLS variant automatically.
+
+> Tip: the M3U route often works when the Xtream API is blocked by the provider.
+
+Credentials are stored locally (app data folder) and reused on the next start. The sign-in is
+remembered until you remove the account (Settings → Sign out).
+
+### Player controls
+
+| Key | Action |
+|---|---|
+| `Space` | Play / pause |
+| `←` / `→` | Seek 10 s back / forward |
+| `↑` / `↓` | Volume |
+| `F` | Fullscreen |
+| `M` | Mute |
+| `Esc` | Close player |
+
+---
+
+## Architecture
+
+```
+Tauri window (WebView2 / WKWebView / WebKitGTK)
+ ├─ React + Vite + Tailwind (src/)          UI, router, player (hls.js)
+ └─ Rust backend (src-tauri/src/)           runs as a local HTTP server on :4523
+     ├─ xtream.rs   Xtream Codes client (login, catalog, details, EPG)
+     ├─ m3u.rs      M3U playlist parser (fallback source)
+     ├─ imdb.rs     key-free IMDb metadata (suggestion API)
+     ├─ ratings.rs  IMDb ratings index from title.ratings.tsv.gz
+     ├─ proxy.rs    stream / HLS / image proxy (Range, m3u8 rewrite)
+     ├─ state.rs    session, catalog cache, enrichment cache
+     └─ routes.rs   HTTP API (axum)
+```
+
+**Why a local server inside the Rust process?** No CORS/mixed-content issues, reliable HLS
+playback, seeking via HTTP Range, and your credentials stay in the backend (never in the
+frontend code). The server binds to `127.0.0.1` only.
+
+### Local API endpoints
+`/api/health` · `/api/login` · `/api/login_m3u` · `/api/logout` · `/api/session` ·
+`/api/categories` · `/api/browse` · `/api/home` · `/api/detail` · `/api/epg` · `/api/enrich` ·
+`/api/enrich_batch` · `/api/refresh` · `/api/diagnose` · `/api/player` · `/api/proxy` · `/api/img`
+
+---
+
+## Installers / builds
+
+BabyFlix is prepared for **Windows, macOS and Linux**.
+Important: a **macOS build is not possible from Windows** — it is produced on a Mac or via the
+included **GitHub Actions CI** (`.github/workflows/release.yml`).
 
 ### Windows
 ```powershell
 npm install
 npm run tauri build
 ```
-Ergebnisse in `src-tauri/target/release/bundle/`:
-- `nsis/BabyFlix_*_x64-setup.exe` (Installer)
-- `msi/BabyFlix_*_x64_en-US.msi` (MSI, sofern WiX verfügbar)
+Output in `src-tauri/target/release/bundle/`:
+- `nsis/BabyFlix_*_x64-setup.exe` (installer)
+- `msi/BabyFlix_*_x64_en-US.msi` (MSI)
 
-### macOS (auf einem Mac)
+### macOS (on a Mac)
 ```bash
 npm install
-npm run tauri build                                   # .app + .dmg
-npm run tauri build -- --target aarch64-apple-darwin  # Apple Silicon
-npm run tauri build -- --target x86_64-apple-darwin   # Intel
+npm run tauri build                                    # .app + .dmg
+npm run tauri build -- --target aarch64-apple-darwin   # Apple Silicon
+npm run tauri build -- --target x86_64-apple-darwin    # Intel
 ```
-Ergebnisse unter `src-tauri/target/**/release/bundle/macos/BabyFlix.app` und
-`.../dmg/BabyFlix_*.dmg`. Voraussetzung: `xcode-select --install` und Rust.
+Output under `src-tauri/target/**/release/bundle/macos/BabyFlix.app` and
+`.../dmg/BabyFlix_*.dmg`. Requires `xcode-select --install` and Rust.
+
+> Note: **automatic updates on macOS require code signing** (an Apple Developer certificate +
+> notarization). Windows and Linux auto-update work without an OS code-signing certificate.
 
 ### Linux
 ```bash
@@ -94,78 +161,42 @@ sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchel
 npm install && npm run tauri build
 ```
 
-### CI: alle Plattformen auf einmal
-Tag pushen oder den Workflow manuell starten:
+## CI / CD
+
+- **`.github/workflows/ci.yml`** — on push/PR to `main`: frontend typecheck + build and
+  `cargo check` on Linux (fast feedback).
+- **`.github/workflows/release.yml`** — on a `v*` tag: builds **Windows, macOS (Intel + Apple
+  Silicon) and Linux**, signs the updater artifacts and **publishes a GitHub Release**.
+
+Cut a release:
+
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v1.0.0 && git push origin v1.0.0
 ```
-Die Artefakte (`.exe`/`.msi`, `.dmg`, `.AppImage`/`.deb`) werden als Build-Artifacts hochgeladen.
 
-## Erste Schritte in der App
+## Automatic updates
 
-Beim Login gibt es **zwei Modi** (Umschalter oben im Formular):
+The app checks `https://github.com/slomo-b/babyflix/releases/latest/download/latest.json` on
+startup (and via Settings → Updates) and offers to install new versions. Updates are signed with
+a Tauri minisign key pair:
 
-**A) Xtream Codes** (JSON-API)
-1. **Server-URL** deines Xtream-Panels eingeben (z. B. `http://server.tv:8080`).
-2. **Benutzername** und **Passwort** eintragen → *Anmelden*.
-3. Katalog wird geladen, Cover/IMDb-Ratings automatisch angereichert.
+- **Public key** — in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`)
+- **Private key + password** — stored as repository secrets
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 
-**B) M3U-Playlist** (Fallback)
-1. Reiter **M3U-Playlist** wählen.
-2. Die **komplette Playlist-URL** einfügen, z. B.
-   `http://server:8080/get.php?username=USER&password=PASS&type=m3u_plus&output=hls`.
-3. *Anmelden* → BabyFlix parst Sender, Filme und Serien aus der Playlist.
-   `output=hls` liefert abspielbare Streams (`.m3u8`); bei `.ts`-Links versucht
-   BabyFlix automatisch die HLS-Variante.
+Generate a new key pair (if you ever need to):
 
-> Tipp: Die M3U-Route funktioniert oft, wenn die Xtream-API vom Anbieter geblockt wird.
-
-Die Zugangsdaten werden lokal gespeichert (App-Data-Ordner) und beim nächsten Start
-automatisch verwendet.
-
-### Bedienung im Player
-
-| Taste | Aktion |
-|---|---|
-| `Space` | Play / Pause |
-| `←` / `→` | 10 s zurück / vor |
-| `↑` / `↓` | Lautstärke |
-| `F` | Vollbild |
-| `M` | Stumm |
-| `Esc` | Player schließen |
+```bash
+npx tauri signer generate -w ~/.tauri/babyflix.key
+```
 
 ---
 
-## Architektur
+## Notes
 
-```
-Tauri-Fenster (WebView2)
- ├─ React + Vite + Tailwind  (src/)            UI, Router, Player (hls.js)
- └─ Rust-Backend (src-tauri/src/)              läuft als lokaler HTTP-Server auf :4523
-     ├─ xtream.rs   Xtream-Codes-Client (Login, Katalog, Details, EPG)
-     ├─ imdb.rs     keyless IMDb (Suggestion-API)
-     ├─ ratings.rs  IMDb-Ratings-Index aus title.ratings.tsv.gz
-     ├─ proxy.rs    Stream-/HLS-/Bild-Proxy (Range, m3u8-Rewrite)
-     ├─ state.rs    Session, Katalog-Cache, Enrichment-Cache
-     └─ routes.rs   HTTP-API (axum)
-```
-
-**Warum ein lokaler Server im Rust-Prozess?** So gibt es keine CORS-/Mixed-Content-Probleme,
-HLS-Playback läuft zuverlässig, Seeking funktioniert per HTTP-Range, und die Zugangsdaten
-bleiben im Backend (nie im Frontend-Code). Der Server bindet ausschließlich an `127.0.0.1`.
-
-### API-Endpunkte (lokal)
-`/api/health` · `/api/login` · `/api/logout` · `/api/session` · `/api/categories` ·
-`/api/browse` · `/api/home` · `/api/detail` · `/api/epg` · `/api/enrich` ·
-`/api/enrich_batch` · `/api/refresh` · `/api/player` · `/api/proxy` · `/api/img`
-
----
-
-## Hinweise
-
-- **Toolchain:** Der Rechner nutzt die Rust-**GNU**-Toolchain. Für eine reine Desktop-App ist
-  `crate-type = ["rlib"]` gesetzt (die Standard-`cdylib`/`staticlib`-Typen überschreiten unter
-  Windows-GNU das Export-Limit → „export ordinal too large“). Für Mobile-Builds ggf. `staticlib`
-  und `cdylib` wieder ergänzen und eine MSVC-Toolchain verwenden.
-- **Rechtliches:** Nutze ausschließlich autorisierte Zugänge. IMDb-Daten sind für persönliche,
-  nicht-kommerzielle Nutzung vorgesehen. BabyFlix hostet und liefert keine Inhalte.
+- **Toolchain:** this machine uses the Rust **GNU** toolchain. For a desktop-only build
+  `crate-type = ["rlib"]` is set (the default `cdylib`/`staticlib` types exceed the Windows-GNU
+  export limit → "export ordinal too large"). For mobile builds re-add `staticlib`/`cdylib` and
+  use an MSVC toolchain.
+- **Legal:** use only authorized access. IMDb data is intended for personal, non-commercial use.
+  BabyFlix hosts and serves no content.

@@ -151,7 +151,7 @@ impl App {
         if !lower.contains("#extm3u") && !lower.contains("#extinf") {
             let snippet: String = text.chars().take(180).collect::<String>().replace(['\r', '\n'], " ");
             return Err(anyhow!(
-                "Keine gültige M3U-Playlist (kein #EXTM3U gefunden). Antwort: {snippet}"
+                "Not a valid M3U playlist (no #EXTM3U found). Response: {snippet}"
             ));
         }
         let parsed = m3u::parse(&text);
@@ -172,7 +172,7 @@ impl App {
             .await
             .as_ref()
             .and_then(|s| s.m3u_url.clone())
-            .ok_or_else(|| anyhow!("Keine M3U-Quelle aktiv"))?;
+            .ok_or_else(|| anyhow!("No active M3U source"))?;
         self.load_m3u(&url).await
     }
 
