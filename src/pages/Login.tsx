@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Link2, Lock, LogIn, Stethoscope, User } from "lucide-react";
-import { api, DiagResponse } from "../lib/api";
-import { useT } from "../lib/i18n";
+import { Languages, Link2, Lock, LogIn, User } from "lucide-react";
+import { api } from "../lib/api";
+import { useLang, useT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 
 export default function Login({ onSuccess }: { onSuccess: () => void }) {
   const t = useT();
+  const lang = useLang((s) => s.lang);
+  const toggleLang = useLang((s) => s.toggle);
   const saved = useStore((s) => s.savedLogin);
   const setSavedLogin = useStore((s) => s.setSavedLogin);
 
@@ -16,8 +18,6 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
   const [m3uUrl, setM3uUrl] = useState(saved?.m3uUrl ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [diag, setDiag] = useState<DiagResponse | null>(null);
-  const [diagLoading, setDiagLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,19 +36,6 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
       setError(err instanceof Error ? err.message : t("login.failed"));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const runDiagnose = async () => {
-    setDiag(null);
-    setDiagLoading(true);
-    try {
-      const res = await api.diagnose(baseUrl, username || undefined, password || undefined);
-      setDiag(res);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("login.diagFailed"));
-    } finally {
-      setDiagLoading(false);
     }
   };
 
@@ -79,7 +66,6 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
               onClick={() => {
                 setMode("xtream");
                 setError(null);
-                setDiag(null);
               }}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
                 mode === "xtream"
@@ -94,7 +80,6 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
               onClick={() => {
                 setMode("m3u");
                 setError(null);
-                setDiag(null);
               }}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
                 mode === "m3u"
@@ -152,7 +137,7 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
             </div>
           )}
 
-          <div className={`grid gap-2 ${mode === "xtream" ? "grid-cols-[1fr_auto]" : "grid-cols-1"}`}>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
             <button type="submit" disabled={loading} className="btn btn-primary py-3">
               {loading ? (
                 t("login.connect")
@@ -162,54 +147,15 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
                 </>
               )}
             </button>
-            {mode === "xtream" && (
-              <button
-                type="button"
-                onClick={runDiagnose}
-                disabled={diagLoading || !baseUrl}
-                className="btn btn-ghost px-4"
-                title={t("login.diagnoseTitle")}
-              >
-                <Stethoscope size={18} className={diagLoading ? "animate-pulse" : ""} />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={toggleLang}
+              title={t("topbar.switchLang")}
+              className="btn btn-ghost px-4 font-bold uppercase"
+            >
+              <Languages size={16} /> {lang}
+            </button>
           </div>
-
-          {diag && (
-            <div className="rounded-xl border border-[var(--border)] bg-black/30 p-3 text-xs">
-              <div className="mb-2 font-semibold text-[var(--muted)]">
-                {t("login.diagResults")} <span className="text-white/90">{diag.normalized_base}</span>
-              </div>
-              <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                {diag.results.map((r, i) => (
-                  <div
-                    key={i}
-                    className="rounded-lg border border-[var(--border)] bg-white/[0.03] px-2.5 py-1.5"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-                          r.ok ? "bg-[var(--ok)]" : r.status ? "bg-[var(--imdb)]" : "bg-red-500"
-                        }`}
-                      />
-                      <span className="font-semibold">
-                        {r.status ? `HTTP ${r.status}` : t("login.diagNoHttp")}
-                      </span>
-                      <span className="text-[var(--muted)]">
-                        {r.ua} · {r.elapsed_ms}ms
-                      </span>
-                      <span className="ml-auto truncate text-[10px] text-[var(--muted)]">
-                        {r.content_type || r.error || ""}
-                      </span>
-                    </div>
-                    {r.snippet && (
-                      <div className="mt-1 line-clamp-2 text-[11px] text-white/70">{r.snippet}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <p className="pt-1 text-center text-[11px] leading-relaxed text-[var(--muted)]">
             {t("login.privacy")}
