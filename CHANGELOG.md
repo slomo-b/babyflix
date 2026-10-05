@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.4] — 2026-10-05
+
+### Fixed
+- Detail header/backdrop is no longer empty: if there is no (or a broken) backdrop image, the
+  poster is shown as a blurred background instead.
+
 ## [1.0.3] — 2026-10-05
 
 ### Changed

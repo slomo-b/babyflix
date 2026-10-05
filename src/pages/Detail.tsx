@@ -30,8 +30,8 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   const detail = data?.detail;
   const imdb = data?.imdb;
 
-  const backdrop = imgUrl(detail?.backdrop ?? imdb?.image ?? item?.cover);
   const poster = imgUrl(imdb?.image ?? item?.cover);
+  const backdropImg = imgUrl(detail?.backdrop);
 
   const seasons = data?.seasons ?? [];
   const activeSeason = seasons[Math.min(seasonIdx, Math.max(0, seasons.length - 1))];
@@ -127,11 +127,25 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   return (
     <div className="animate-fade-in pb-10">
       {/* backdrop (flush with top, no negative top margin so nothing is clipped) */}
-      <div className="relative -mx-8 mb-6 h-[300px] overflow-hidden">
-        {backdrop && (
-          <img src={backdrop} alt="" className="h-full w-full scale-105 object-cover opacity-55" />
+      <div className="relative -mx-8 mb-6 h-[300px] overflow-hidden bg-[var(--surface-2)]">
+        {poster && (
+          <img
+            src={poster}
+            alt=""
+            className="absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
+          />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/60 to-transparent" />
+        {backdropImg && (
+          <img
+            src={backdropImg}
+            alt=""
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+            className="absolute inset-0 h-full w-full object-cover opacity-60"
+          />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/55 to-transparent" />
         <button
           onClick={() => navigate(-1)}
           aria-label={t("common.back")}
