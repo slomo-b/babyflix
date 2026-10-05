@@ -22,6 +22,10 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (mode === "xtream" && !/^https?:\/\//i.test(baseUrl.trim())) {
+      setError(t("login.needProtocol"));
+      return;
+    }
     setLoading(true);
     try {
       if (mode === "m3u") {

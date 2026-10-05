@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.3] — 2026-10-05
+
+### Changed
+- The **server URL must now be entered with the full protocol** (`http://` or `https://`);
+  BabyFlix no longer adds it automatically.
+
+### Fixed
+- Long titles on the detail page now wrap instead of being clipped.
+- Zero/unknown durations are no longer shown as `0`.
+
 ## [1.0.2] — 2026-10-05
 
 ### Added

@@ -22,7 +22,8 @@ export function durationToMinutes(input: string | null | undefined): number | nu
 
 export function fmtDuration(input: string | null | undefined): string | null {
   const mins = durationToMinutes(input);
-  if (mins == null || mins <= 0) return input || null;
+  if (mins == null) return input || null;
+  if (mins <= 0) return null;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   if (h > 0) return `${h}h ${m}m`;

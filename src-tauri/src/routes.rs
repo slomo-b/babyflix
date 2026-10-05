@@ -579,21 +579,14 @@ struct DiagReq {
 
 async fn diagnose(State(app): State<Arc<App>>, Json(req): Json<DiagReq>) -> Json<Value> {
     let base = xtream::normalize_base(&req.base_url);
-    let mut bases = vec![base.clone()];
-    if let Some(alt) = xtream::alternate_scheme(&base) {
-        if alt != base {
-            bases.push(alt);
-        }
-    }
     let mut results = Vec::new();
-    for b in &bases {
-        for ua in [xtream::UA, xtream::UA_VLC, xtream::UA_SMARTERS] {
-            let url = match (&req.username, &req.password) {
-                (Some(u), p) => xtream::build_url(b, u, p.as_deref().unwrap_or(""), None, &[])
-                    .unwrap_or_else(|_| format!("{b}/player_api.php")),
-                _ => format!("{b}/player_api.php"),
-            };
-            let p = xtream::probe(&app.client, &url, ua).await;
+    for ua in [xtream::UA, xtream::UA_VLC, xtream::UA_SMARTERS] {
+        let url = match (&req.username, &req.password) {
+            (Some(u), p) => xtream::build_url(&base, u, p.as_deref().unwrap_or(""), None, &[])
+                .unwrap_or_else(|_| format!("{base}/player_api.php")),
+            _ => format!("{base}/player_api.php"),
+        };
+        let p = xtream::probe(&app.client, &url, ua).await;
             results.push(json!({
                 "base": b,
                 "ua": xtream::ua_label(ua),

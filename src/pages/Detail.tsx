@@ -195,7 +195,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
         </div>
 
         <div className="min-w-0 flex-1 pt-2 lg:pt-32">
-          <h1 className="text-4xl font-black leading-tight tracking-tight">
+          <h1 className="break-words text-4xl font-black leading-tight tracking-tight">
             <span className="text-gradient">{imdb?.title || item.name}</span>
           </h1>
 

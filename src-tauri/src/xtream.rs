@@ -128,15 +128,11 @@ pub struct EpgEntry {
 
 pub fn normalize_base(input: &str) -> String {
     let raw = input.trim();
-    let has_scheme = raw.starts_with("http://") || raw.starts_with("https://");
-    let with_scheme = if has_scheme {
-        raw.to_string()
-    } else {
-        // Heuristic: an explicit non-443 port usually means a plain-HTTP IPTV panel.
-        let looks_http = raw.contains(':') && !raw.ends_with(":443");
-        format!("{}://{}", if looks_http { "http" } else { "https" }, raw)
-    };
-    if let Ok(u) = reqwest::Url::parse(&with_scheme) {
+    // The user enters the protocol themselves; never add a scheme automatically.
+    if !(raw.starts_with("http://") || raw.starts_with("https://")) {
+        return raw.trim_end_matches('/').to_string();
+    }
+    if let Ok(u) = reqwest::Url::parse(raw) {
         if let Some(host) = u.host_str() {
             let mut base = String::new();
             base.push_str(u.scheme());
@@ -172,21 +168,7 @@ pub fn normalize_base(input: &str) -> String {
             return base;
         }
     }
-    let mut s = raw.trim_end_matches('/').to_string();
-    if !s.starts_with("http://") && !s.starts_with("https://") {
-        s = format!("https://{s}");
-    }
-    s
-}
-
-pub fn alternate_scheme(base: &str) -> Option<String> {
-    if let Some(rest) = base.strip_prefix("https://") {
-        Some(format!("http://{rest}"))
-    } else if let Some(rest) = base.strip_prefix("http://") {
-        Some(format!("https://{rest}"))
-    } else {
-        None
-    }
+    raw.trim_end_matches('/').to_string()
 }
 
 fn loose_str(v: Option<&Value>) -> Option<String> {
@@ -353,28 +335,25 @@ async fn try_login(
 
 pub async fn login(client: &reqwest::Client, creds: &Credentials) -> Result<Session> {
     let base = normalize_base(&creds.base_url);
-    let mut bases = vec![base.clone()];
-    if let Some(alt) = alternate_scheme(&base) {
-        if alt != base {
-            bases.push(alt);
-        }
+    if !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Err(anyhow!(
+            "Server URL must include the protocol, e.g. http://server:8080 or https://server.example"
+        ));
     }
 
     let mut attempts: Vec<String> = Vec::new();
     let mut reached_any = false;
 
-    // Phase 1: try both schemes with a browser user agent.
-    for b in &bases {
-        match try_login(client, b, &creds.username, &creds.password, UA).await {
-            Ok(s) => return Ok(s),
-            Err(e) => {
-                reached_any |= e.reached;
-                attempts.push(format!("  • {} [browser] → {}", b, e.msg));
-            }
+    // Try exactly the URL the user entered, with a browser user agent first.
+    match try_login(client, &base, &creds.username, &creds.password, UA).await {
+        Ok(s) => return Ok(s),
+        Err(e) => {
+            reached_any |= e.reached;
+            attempts.push(format!("  • {} [browser] → {}", base, e.msg));
         }
     }
 
-    // Phase 2: if the host is reachable but rejected the browser UA, try player UAs.
+    // If the host is reachable but rejected the browser UA, try player UAs.
     if reached_any {
         for ua in [UA_VLC, UA_SMARTERS] {
             match try_login(client, &base, &creds.username, &creds.password, ua).await {
@@ -385,8 +364,7 @@ pub async fn login(client: &reqwest::Client, creds: &Credentials) -> Result<Sess
     }
 
     Err(anyhow!(
-        "Login failed. All attempts:\n{}\n\nPlease check the server URL, username and password. \
-Is the server maybe on a different port or only reachable over HTTPS?",
+        "Login failed. All attempts:\n{}\n\nPlease check the server URL (including http:// or https://), username and password.",
         attempts.join("\n")
     ))
 }
