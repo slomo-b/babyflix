@@ -587,18 +587,17 @@ async fn diagnose(State(app): State<Arc<App>>, Json(req): Json<DiagReq>) -> Json
             _ => format!("{base}/player_api.php"),
         };
         let p = xtream::probe(&app.client, &url, ua).await;
-            results.push(json!({
-                "base": b,
-                "ua": xtream::ua_label(ua),
-                "url": url,
-                "status": p.status,
-                "ok": p.ok,
-                "content_type": p.content_type,
-                "snippet": p.snippet,
-                "elapsed_ms": p.elapsed_ms,
-                "error": p.error,
-            }));
-        }
+        results.push(json!({
+            "base": &base,
+            "ua": xtream::ua_label(ua),
+            "url": url,
+            "status": p.status,
+            "ok": p.ok,
+            "content_type": p.content_type,
+            "snippet": p.snippet,
+            "elapsed_ms": p.elapsed_ms,
+            "error": p.error,
+        }));
     }
     Json(json!({ "normalized_base": base, "results": results }))
 }
