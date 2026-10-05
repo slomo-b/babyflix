@@ -9,10 +9,11 @@ import {
   LogOut,
   RefreshCw,
   ShieldCheck,
+  Stethoscope,
   Users,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
-import { api } from "../lib/api";
+import { api, DiagResponse } from "../lib/api";
 import { useStore } from "../lib/store";
 import { useUpdater } from "../lib/updater";
 import { Lang, localeOf, useLang, useT } from "../lib/i18n";
@@ -38,6 +39,10 @@ export default function Settings() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [diag, setDiag] = useState<DiagResponse | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagError, setDiagError] = useState<string | null>(null);
+  const savedLogin = useStore((s) => s.savedLogin);
 
   const upStatus = useUpdater((s) => s.status);
   const upVersion = useUpdater((s) => s.version);
@@ -81,6 +86,26 @@ export default function Settings() {
       qc.invalidateQueries({ queryKey: ["session"] });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runDiagnose = async () => {
+    const server = savedLogin?.baseUrl;
+    if (!server) return;
+    setDiag(null);
+    setDiagError(null);
+    setDiagLoading(true);
+    try {
+      const res = await api.diagnose(
+        server,
+        savedLogin?.username || undefined,
+        savedLogin?.password || undefined
+      );
+      setDiag(res);
+    } catch (err) {
+      setDiagError(err instanceof Error ? err.message : t("login.diagFailed"));
+    } finally {
+      setDiagLoading(false);
     }
   };
 
@@ -144,6 +169,66 @@ export default function Settings() {
           <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
           {refreshing ? t("settings.reloading") : t("settings.reload")}
         </button>
+      </section>
+
+      <section className="glass mb-6 rounded-2xl p-6">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-[var(--muted)]">
+          <Stethoscope size={16} /> {t("settings.diagnosis")}
+        </h2>
+        {savedLogin?.mode === "m3u" ? (
+          <p className="text-sm text-[var(--muted)]">{t("settings.diagnosisM3u")}</p>
+        ) : (
+          <>
+            <p className="mb-4 text-sm text-[var(--muted)]">{t("settings.diagnosisHint")}</p>
+            <button
+              className="btn btn-ghost"
+              onClick={runDiagnose}
+              disabled={diagLoading || !savedLogin}
+            >
+              <Stethoscope size={16} className={diagLoading ? "animate-pulse" : ""} />
+              {diagLoading ? t("settings.diagnosing") : t("settings.diagnose")}
+            </button>
+
+            {diagError && <div className="mt-3 text-xs text-red-300">{diagError}</div>}
+
+            {diag && (
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-black/30 p-3 text-xs">
+                <div className="mb-2 font-semibold text-[var(--muted)]">
+                  {t("login.diagResults")}{" "}
+                  <span className="text-white/90">{diag.normalized_base}</span>
+                </div>
+                <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                  {diag.results.map((r, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-[var(--border)] bg-white/[0.03] px-2.5 py-1.5"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+                            r.ok ? "bg-[var(--ok)]" : r.status ? "bg-[var(--imdb)]" : "bg-red-500"
+                          }`}
+                        />
+                        <span className="font-semibold">
+                          {r.status ? `HTTP ${r.status}` : t("login.diagNoHttp")}
+                        </span>
+                        <span className="text-[var(--muted)]">
+                          {r.ua} · {r.elapsed_ms}ms
+                        </span>
+                        <span className="ml-auto truncate text-[10px] text-[var(--muted)]">
+                          {r.content_type || r.error || ""}
+                        </span>
+                      </div>
+                      {r.snippet && (
+                        <div className="mt-1 line-clamp-2 text-[11px] text-white/70">{r.snippet}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </section>
 
       <section className="glass mb-6 rounded-2xl p-6">

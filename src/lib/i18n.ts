@@ -180,6 +180,11 @@ const de: Record<string, string> = {
   "settings.aboutText":
     "BabyFlix ist ein Plex-artiger Player für deine eigenen, autorisierten IPTV-Zugänge (Xtream Codes API). Cover, Beschreibungen und Bewertungen werden aus deinem Panel sowie aus öffentlichen, schlüsselfreien IMDb-Daten angereichert. BabyFlix stellt selbst keine Inhalte bereit. IMDb-Daten dienen ausschließlich der persönlichen, nicht-kommerziellen Nutzung.",
   "settings.logout": "Abmelden",
+  "settings.diagnosis": "Verbindungsdiagnose",
+  "settings.diagnosisHint": "Prüft die Erreichbarkeit deines Xtream-Servers (HTTP/HTTPS und verschiedene User-Agents).",
+  "settings.diagnosisM3u": "Für M3U-Playlists ist keine Diagnose verfügbar – die Playlist wird beim Anmelden direkt geladen.",
+  "settings.diagnose": "Diagnose starten",
+  "settings.diagnosing": "Prüfe…",
 
   // player
   "player.live": "Live",
@@ -333,6 +338,11 @@ const en: Record<string, string> = {
   "settings.aboutText":
     "BabyFlix is a Plex-like player for your own authorized IPTV access (Xtream Codes API). Posters, descriptions and ratings are enriched from your panel and from public, key-free IMDb data. BabyFlix provides no content itself. IMDb data is for personal, non-commercial use only.",
   "settings.logout": "Sign out",
+  "settings.diagnosis": "Connection diagnosis",
+  "settings.diagnosisHint": "Checks reachability of your Xtream server (HTTP/HTTPS and different user agents).",
+  "settings.diagnosisM3u": "No diagnosis is available for M3U playlists – the playlist is loaded directly when signing in.",
+  "settings.diagnose": "Run diagnosis",
+  "settings.diagnosing": "Checking…",
 
   "player.live": "Live",
   "player.close": "Close",

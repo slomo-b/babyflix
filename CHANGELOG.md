@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1] — 2026-10-05
+
+### Changed
+- **Login screen:** replaced the diagnostics button with a **DE/EN language switch** that works
+  before signing in.
+- Moved the **connection diagnosis** into **Settings**.
+
 ## [1.0.0] — 2026-10-05
 
 Initial release.
@@ -16,6 +23,7 @@ Initial release.
 - **German / English** interface with a language switch.
 - Remembered login (cleared only when the account is removed).
 - Windows installer (**NSIS `.exe`** and **MSI**); macOS and Linux via CI.
+- **Automatic updates** from GitHub Releases (Tauri updater).
 
 ### Legal
 BabyFlix provides no content. It is a player for your own authorized IPTV access.

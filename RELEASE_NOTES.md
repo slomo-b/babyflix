@@ -1,4 +1,4 @@
-# BabyFlix v1.0.0
+# BabyFlix
 
 A **Plex-like desktop streaming app** for movies, series and live TV — built on the
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
@@ -12,19 +12,19 @@ ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React 
 - ▶️ **HLS player** with fullscreen, seeking, volume and keyboard shortcuts
 - 📺 **Live TV** with channel logos and **EPG** (now / next)
 - 📚 **Series** with seasons/episodes and autoplay of the next episode
-- ⏱️ **Continue watching** and 🌍 **German / English** UI
+- ⏱️ **Continue watching** and 🌍 **German / English** UI (switchable)
 - 🔄 **Automatic updates** straight from these GitHub releases
 
 ## 📦 Downloads
 
 | Platform | File | Notes |
 |---|---|---|
-| **Windows** | `BabyFlix_1.0.0_x64-setup.exe` | Installer (recommended) |
-| **Windows** | `BabyFlix_1.0.0_x64_en-US.msi` | MSI package |
-| **macOS (Apple Silicon)** | `BabyFlix_1.0.0_aarch64.dmg` | M1/M2/M3 or newer |
-| **macOS (Intel)** | `BabyFlix_1.0.0_x64.dmg` | Intel Macs |
-| **Linux** | `BabyFlix_1.0.0_amd64.AppImage` | Universal, no install |
-| **Linux** | `BabyFlix-1.0.0-1.x86_64.rpm` / `BabyFlix_1.0.0_amd64.deb` | Package managers |
+| **Windows** | `BabyFlix_*_x64-setup.exe` | Installer (recommended) |
+| **Windows** | `BabyFlix_*_x64_en-US.msi` | MSI package |
+| **macOS (Apple Silicon)** | `BabyFlix_*_aarch64.dmg` | M1/M2/M3 or newer |
+| **macOS (Intel)** | `BabyFlix_*_x64.dmg` | Intel Macs |
+| **Linux** | `BabyFlix_*_amd64.AppImage` | Universal, no install |
+| **Linux** | `BabyFlix-*_x86_64.rpm` / `BabyFlix_*_amd64.deb` | Package managers |
 
 ## 🔄 Automatic updates
 
