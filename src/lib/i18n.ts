@@ -75,6 +75,16 @@ const de: Record<string, string> = {
   "login.diagResults": "Diagnose · erkannte URL:",
   "login.diagNoHttp": "kein HTTP",
   "login.savedHint": "Gespeicherte Anmeldung geladen – du bleibst angemeldet, bis du das Konto entfernst.",
+  "update.title": "Updates",
+  "update.check": "Nach Updates suchen",
+  "update.checking": "Suche…",
+  "update.upToDate": "Du hast die neueste Version.",
+  "update.available": "Version {v} verfügbar",
+  "update.bannerHint": "Ein Update ist verfügbar. BabyFlix wird nach der Installation neu gestartet.",
+  "update.install": "Jetzt aktualisieren",
+  "update.downloading": "Wird heruntergeladen… {p}%",
+  "update.currentVersion": "Aktuelle Version: {v}",
+  "update.error": "Update fehlgeschlagen: {e}",
   "login.privacy":
     "Deine Zugangsdaten bleiben lokal auf diesem Gerät. BabyFlix stellt keine Inhalte bereit – du nutzt deinen eigenen, autorisierten Zugang.",
 
@@ -227,6 +237,16 @@ const en: Record<string, string> = {
   "login.diagResults": "Diagnosis · detected URL:",
   "login.diagNoHttp": "no HTTP",
   "login.savedHint": "Saved sign-in loaded – you stay signed in until you remove the account.",
+  "update.title": "Updates",
+  "update.check": "Check for updates",
+  "update.checking": "Checking…",
+  "update.upToDate": "You are on the latest version.",
+  "update.available": "Version {v} available",
+  "update.bannerHint": "An update is available. BabyFlix will restart after installing.",
+  "update.install": "Update now",
+  "update.downloading": "Downloading… {p}%",
+  "update.currentVersion": "Current version: {v}",
+  "update.error": "Update failed: {e}",
   "login.privacy":
     "Your credentials stay local on this device. BabyFlix provides no content – you use your own authorized access.",
 

@@ -1,10 +1,13 @@
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
 import { api } from "./lib/api";
 import { useT } from "./lib/i18n";
+import { useUpdater } from "./lib/updater";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Player } from "./components/Player";
+import { UpdateBanner } from "./components/UpdateBanner";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import Movies from "./pages/Movies";
@@ -36,15 +39,25 @@ export default function App() {
     refetchInterval: 15000,
   });
 
+  // Check for updates shortly after launch (packaged app only).
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+    const timer = setTimeout(() => useUpdater.getState().check(), 6000);
+    return () => clearTimeout(timer);
+  }, []);
+
   if (session.isLoading) return <Splash />;
 
   if (!session.data?.logged_in) {
     return (
-      <Login
-        onSuccess={() => {
-          qc.invalidateQueries();
-        }}
-      />
+      <>
+        <Login
+          onSuccess={() => {
+            qc.invalidateQueries();
+          }}
+        />
+        <UpdateBanner />
+      </>
     );
   }
 
@@ -69,6 +82,7 @@ export default function App() {
         </div>
       </main>
       <Player />
+      <UpdateBanner />
     </div>
   );
 }

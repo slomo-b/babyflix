@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
   CalendarClock,
   Database,
+  Download,
   Languages,
   LogOut,
   RefreshCw,
   ShieldCheck,
   Users,
 } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
+import { useUpdater } from "../lib/updater";
 import { Lang, localeOf, useLang, useT } from "../lib/i18n";
 import { Select } from "../components/Select";
 
@@ -34,14 +37,29 @@ export default function Settings() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+
+  const upStatus = useUpdater((s) => s.status);
+  const upVersion = useUpdater((s) => s.version);
+  const upProgress = useUpdater((s) => s.progress);
+  const upError = useUpdater((s) => s.error);
+  const checkUpdates = useUpdater((s) => s.check);
+  const installUpdate = useUpdater((s) => s.install);
 
   const autoplayNext = useStore((s) => s.autoplayNext);
   const setAutoplayNext = useStore((s) => s.setAutoplayNext);
   const clearHistory = useStore((s) => s.clearHistory);
   const historyCount = useStore((s) => s.history.length);
+  const setSavedLogin = useStore((s) => s.setSavedLogin);
 
   const ui = (session.data?.user_info ?? {}) as Record<string, unknown>;
   const si = (session.data?.server_info ?? {}) as Record<string, unknown>;
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(""));
+  }, []);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -52,8 +70,6 @@ export default function Settings() {
       setRefreshing(false);
     }
   };
-
-  const setSavedLogin = useStore((s) => s.setSavedLogin);
 
   const logout = async () => {
     setBusy(true);
@@ -128,6 +144,52 @@ export default function Settings() {
           <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
           {refreshing ? t("settings.reloading") : t("settings.reload")}
         </button>
+      </section>
+
+      <section className="glass mb-6 rounded-2xl p-6">
+        <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-[var(--muted)]">
+          <Download size={16} /> {t("update.title")}
+        </h2>
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <span className="text-[var(--muted)]">
+            {t("update.currentVersion", { v: appVersion || "–" })}
+          </span>
+          {upStatus === "uptodate" && (
+            <span className="text-[var(--ok)]">{t("update.upToDate")}</span>
+          )}
+          {upStatus === "available" && (
+            <span className="text-[var(--accent-2)]">{t("update.available", { v: upVersion ?? "" })}</span>
+          )}
+        </div>
+
+        {upStatus === "error" && (
+          <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {t("update.error", { e: upError ?? "" })}
+          </div>
+        )}
+
+        {upStatus === "downloading" ? (
+          <div>
+            <div className="mb-1 text-[11px] text-[var(--muted)]">
+              {t("update.downloading", { p: upProgress })}
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+              <div
+                className="h-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-2)] transition-all"
+                style={{ width: `${upProgress}%` }}
+              />
+            </div>
+          </div>
+        ) : upStatus === "available" ? (
+          <button className="btn btn-primary" onClick={() => installUpdate()}>
+            <Download size={16} /> {t("update.install")}
+          </button>
+        ) : (
+          <button className="btn btn-ghost" onClick={() => checkUpdates()} disabled={upStatus === "checking"}>
+            <RefreshCw size={16} className={upStatus === "checking" ? "animate-spin" : ""} />
+            {upStatus === "checking" ? t("update.checking") : t("update.check")}
+          </button>
+        )}
       </section>
 
       <section className="glass mb-6 rounded-2xl p-6">

@@ -1,4 +1,4 @@
-name: build
+name: release
 
 on:
   workflow_dispatch:
@@ -40,6 +40,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          key: ${{ matrix.platform }}-${{ matrix.target }}
+
       - name: Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -49,17 +55,20 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Build app + installers
+      - name: Build app + installers (signed updater artifacts)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-          # On tag pushes (v*), publish a draft GitHub Release with all installers.
+          # Publish a GitHub Release on tag pushes. The updater reads
+          # /releases/latest/download/latest.json from this (published) release.
           tagName: v__VERSION__
           releaseName: "BabyFlix v__VERSION__"
-          releaseBody: "Download the installer for your platform below."
-          releaseDraft: true
+          releaseBody: "Automatic update assets and installers for Windows, macOS and Linux."
+          releaseDraft: false
           prerelease: false
 
       - name: Upload artifacts
