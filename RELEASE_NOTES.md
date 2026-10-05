@@ -1,0 +1,47 @@
+# BabyFlix v1.0.0
+
+A **Plex-like desktop streaming app** for movies, series and live TV — built on the
+**Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
+ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
+
+## ✨ Highlights
+
+- 🎬 **Movies / Series / Live TV** with categories, search and sorting
+- 🔌 **Two login modes:** Xtream Codes and M3U playlist (fallback)
+- 🖼️ **Automatic posters** (panel + IMDb) and ⭐ **real IMDb ratings** — no API key
+- ▶️ **HLS player** with fullscreen, seeking, volume and keyboard shortcuts
+- 📺 **Live TV** with channel logos and **EPG** (now / next)
+- 📚 **Series** with seasons/episodes and autoplay of the next episode
+- ⏱️ **Continue watching** and 🌍 **German / English** UI
+- 🔄 **Automatic updates** straight from these GitHub releases
+
+## 📦 Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| **Windows** | `BabyFlix_1.0.0_x64-setup.exe` | Installer (recommended) |
+| **Windows** | `BabyFlix_1.0.0_x64_en-US.msi` | MSI package |
+| **macOS (Apple Silicon)** | `BabyFlix_1.0.0_aarch64.dmg` | M1/M2/M3 or newer |
+| **macOS (Intel)** | `BabyFlix_1.0.0_x64.dmg` | Intel Macs |
+| **Linux** | `BabyFlix_1.0.0_amd64.AppImage` | Universal, no install |
+| **Linux** | `BabyFlix-1.0.0-1.x86_64.rpm` / `BabyFlix_1.0.0_amd64.deb` | Package managers |
+
+## 🔄 Automatic updates
+
+Installed apps check this release's `latest.json` on startup and update themselves (signed
+updater artifacts). **macOS automatic updates require code signing** (Apple Developer
+certificate + notarization); Windows and Linux auto-update work without OS code signing.
+
+## 🔐 Privacy
+
+Your credentials stay on your device. BabyFlix runs a local backend on `127.0.0.1` and talks
+directly to your IPTV panel and to IMDb.
+
+## ⚠️ Legal
+
+BabyFlix provides **no content** — you use your **own, authorized** IPTV access. IMDb data is
+intended for **personal, non-commercial use only**.
+
+---
+
+See [`CHANGELOG.md`](https://github.com/slomo-b/babyflix/blob/main/CHANGELOG.md) for details.
