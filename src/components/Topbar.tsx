@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Languages, RefreshCw, Search as SearchIcon } from "lucide-react";
+import { Download, Languages, RefreshCw, Search as SearchIcon } from "lucide-react";
 import { api, HealthResponse } from "../lib/api";
 import { useLang, useT } from "../lib/i18n";
+import { useUpdater } from "../lib/updater";
 
 export function Topbar({ health }: { health?: HealthResponse }) {
   const t = useT();
   const lang = useLang((s) => s.lang);
   const toggle = useLang((s) => s.toggle);
+  const upStatus = useUpdater((s) => s.status);
+  const upProgress = useUpdater((s) => s.progress);
+  const installUpdate = useUpdater((s) => s.install);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
@@ -61,6 +65,18 @@ export function Topbar({ health }: { health?: HealthResponse }) {
           <Languages size={15} />
           {lang}
         </button>
+
+        {(upStatus === "available" || upStatus === "downloading") && (
+          <button
+            onClick={() => upStatus === "available" && installUpdate()}
+            disabled={upStatus === "downloading"}
+            title={t("update.install")}
+            className="flex items-center gap-2 rounded-xl border border-transparent bg-gradient-to-r from-[var(--accent)] to-[var(--accent-3)] px-3 py-2 font-semibold text-white shadow-lg transition hover:brightness-110 disabled:opacity-80"
+          >
+            <Download size={15} className={upStatus === "downloading" ? "animate-pulse" : ""} />
+            <span>{upStatus === "downloading" ? `${upProgress}%` : t("topbar.update")}</span>
+          </button>
+        )}
 
         <button
           onClick={refresh}

@@ -53,6 +53,7 @@ const de: Record<string, string> = {
   // topbar
   "topbar.searchPlaceholder": "Filme, Serien, Sender suchen…",
   "topbar.library": "Katalog",
+  "topbar.update": "Update",
   "topbar.ratingsReady": "IMDb-Daten bereit",
   "topbar.ratingsLoading": "IMDb-Daten werden geladen…",
   "topbar.switchLang": "Sprache wechseln",
@@ -221,6 +222,7 @@ const en: Record<string, string> = {
 
   "topbar.searchPlaceholder": "Search movies, series, channels…",
   "topbar.library": "Library",
+  "topbar.update": "Update",
   "topbar.ratingsReady": "IMDb data ready",
   "topbar.ratingsLoading": "Loading IMDb data…",
   "topbar.switchLang": "Switch language",

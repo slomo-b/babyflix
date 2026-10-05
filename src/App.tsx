@@ -42,8 +42,13 @@ export default function App() {
   // Check for updates shortly after launch (packaged app only).
   useEffect(() => {
     if (!import.meta.env.PROD) return;
-    const timer = setTimeout(() => useUpdater.getState().check(), 6000);
-    return () => clearTimeout(timer);
+    const check = () => useUpdater.getState().check();
+    const timer = setTimeout(check, 6000);
+    const interval = setInterval(check, 6 * 60 * 60 * 1000);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, []);
 
   if (session.isLoading) return <Splash />;

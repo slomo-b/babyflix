@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.2] — 2026-10-05
+
+### Added
+- **Update button in the top bar** (next to the library reload) that appears automatically
+  when a new version is available and installs it with one click.
+
+### Changed
+- The update check now also runs periodically (every 6 hours).
+
 ## [1.0.1] — 2026-10-05
 
 ### Changed
