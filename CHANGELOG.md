@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.8] — 2026-10-06
+
+### Fixed
+- Remuxed streams now show the **correct total length** (from FFprobe) instead of the growing
+  HLS length, so the seek bar and time display are right.
+
+### Added
+- When the interface language is **German**, remuxed titles automatically start with the
+  **German audio track** if the file has one.
+
 ## [1.0.7] — 2026-10-06
 
 ### Added

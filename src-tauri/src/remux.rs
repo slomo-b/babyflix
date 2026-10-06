@@ -96,6 +96,7 @@ impl Remux {
         cmd.arg("-v")
             .arg("error")
             .arg("-show_streams")
+            .arg("-show_format")
             .arg("-of")
             .arg("json")
             .arg("-user_agent")
@@ -131,6 +132,11 @@ impl Remux {
         let mut audio = Vec::new();
         let mut video = Vec::new();
         let mut subtitle = Vec::new();
+        let duration = v
+            .get("format")
+            .and_then(|f| f.get("duration"))
+            .and_then(|d| d.as_str())
+            .and_then(|s| s.trim().parse::<f64>().ok());
         if let Some(streams) = v.get("streams").and_then(|s| s.as_array()) {
             for s in streams {
                 let ty = s.get("codec_type").and_then(|x| x.as_str()).unwrap_or("");
@@ -151,7 +157,18 @@ impl Remux {
                 }
             }
         }
-        Ok(serde_json::json!({ "audio": audio, "video": video, "subtitle": subtitle }))
+        Ok(serde_json::json!({ "audio": audio, "video": video, "subtitle": subtitle, "duration": duration }))
+    }
+
+    pub fn duration_secs(&self, url: &str) -> Option<f64> {
+        self.probe_value(&[
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nk=1:nw=1",
+            url,
+        ])
+        .and_then(|s| s.lines().next().and_then(|l| l.trim().parse::<f64>().ok()))
     }
 
     /// Start (or reuse) a remux session; returns the token.

@@ -17,7 +17,7 @@ import { API_BASE, playerUrl } from "../lib/api";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { fmtTime } from "../lib/format";
-import { useT } from "../lib/i18n";
+import { useLang, useT } from "../lib/i18n";
 
 interface TrackInfo {
   name: string;
@@ -51,10 +51,18 @@ function langName(code?: string): string {
   return LANGS[code.toLowerCase().slice(0, 2)] || code.toUpperCase();
 }
 
+function isGermanTrack(lang?: string | null, title?: string | null): boolean {
+  const l = (lang || "").toLowerCase();
+  if (l === "de" || l === "ger" || l === "deu" || l.startsWith("de")) return true;
+  const t = (title || "").toLowerCase();
+  return t.includes("deutsch") || t.includes("german");
+}
+
 // Containers the webview can play directly.
 const BROWSER_CONTAINERS = ["mp4", "m4v", "webm", "ogv", "ogg"];
 
 export function Player() {
+  const appLang = useLang((s) => s.lang);
   const t = useT();
   const current = useStore((s) => s.current);
   const stop = useStore((s) => s.stop);
@@ -70,6 +78,7 @@ export function Player() {
   const remuxTokenRef = useRef<string | null>(null);
   const hideTimer = useRef<number | null>(null);
   const lastSave = useRef(0);
+  const autoAudioRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -115,6 +124,7 @@ export function Player() {
   useEffect(() => {
     setRemuxAudio(0);
     setForceRemux(false);
+    autoAudioRef.current = false;
   }, [streamKey]);
 
   // load stream
@@ -179,27 +189,37 @@ export function Player() {
     const startPlayback = async () => {
       if (wantRemux) {
         try {
-          const res = await api.remux(current.kind, current.id, current.ext, remuxAudio);
-          if (cancelled) {
-            api.remuxStop(res.token);
-            return;
-          }
-          sessionToken = res.token;
-          remuxTokenRef.current = res.token;
-          setAudioIndex(remuxAudio);
-          api
-            .streams(current.kind, current.id, current.ext)
-            .then((info) => {
-              if (!cancelled && info.audio?.length) {
+          let audioIdx = remuxAudio;
+          if (!autoAudioRef.current) {
+            autoAudioRef.current = true;
+            try {
+              const info = await api.streams(current.kind, current.id, current.ext);
+              if (cancelled) return;
+              if (info.audio?.length) {
                 setAudioTracks(
                   info.audio.map((a, i) => ({
                     name: a.title || a.codec || `Audio ${i + 1}`,
                     lang: a.lang ?? undefined,
                   }))
                 );
+                if (appLang === "de") {
+                  const gi = info.audio.findIndex((a) => isGermanTrack(a.lang, a.title));
+                  if (gi >= 0) audioIdx = gi;
+                }
               }
-            })
-            .catch(() => {});
+            } catch {
+              /* ignore */
+            }
+          }
+          const res = await api.remux(current.kind, current.id, current.ext, audioIdx);
+          if (cancelled) {
+            api.remuxStop(res.token);
+            return;
+          }
+          sessionToken = res.token;
+          remuxTokenRef.current = res.token;
+          setAudioIndex(audioIdx);
+          if (res.duration && res.duration > 0) setDuration(res.duration);
           setupHls(API_BASE + res.playlist, () => setError(true));
           return;
         } catch {
@@ -221,7 +241,9 @@ export function Player() {
 
     const resume = history.find((h) => h.key === current.historyKey);
     const onLoaded = () => {
-      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      if (!remuxRef.current) {
+        setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      }
       setLoading(false);
       if (!hlsRef.current) {
         const subs: TrackInfo[] = [];
