@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.6] — 2026-10-06
+
+### Added
+- **Watchlist**: a new sidebar tab listing everything you saved via “Add to watchlist”.
+- **Category search**: filter the category list for movies/series, plus a searchable live-TV
+  category picker.
+- **Player track selection**: choose **audio**, **subtitle** and **video quality** tracks (HLS)
+  and embedded subtitles for native playback — useful when a file has multiple tracks.
+
+### Changed
+- Watchlist entries now store title/poster, so the list renders instantly.
+
 ## [1.0.5] — 2026-10-06
 
 ### Changed

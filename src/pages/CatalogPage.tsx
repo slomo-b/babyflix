@@ -23,6 +23,7 @@ export function CatalogPage({
   const [category, setCategory] = useState(params.get("category") ?? "");
   const [sort, setSort] = useState("added");
   const [search, setSearch] = useState("");
+  const [catQuery, setCatQuery] = useState("");
   const { open } = useOpen();
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -51,6 +52,13 @@ export function CatalogPage({
     getNextPageParam: (last, pages) =>
       pages.length * last.page_size < last.total ? last.page + 1 : undefined,
   });
+
+  const filteredCats = useMemo(() => {
+    const q = catQuery.trim().toLowerCase();
+    const all = cats.data?.categories ?? [];
+    if (!q) return all;
+    return all.filter((c) => c.name.toLowerCase().includes(q));
+  }, [cats.data, catQuery]);
 
   const items: MediaItem[] = useMemo(
     () => query.data?.pages.flatMap((p) => p.items) ?? [],
@@ -118,11 +126,27 @@ export function CatalogPage({
         </div>
       </div>
 
+      <div className="mb-3 flex items-center gap-3">
+        <div className="relative w-72 max-w-full">
+          <SearchIcon
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]"
+          />
+          <input
+            value={catQuery}
+            onChange={(e) => setCatQuery(e.target.value)}
+            placeholder={t("catalog.searchCategories")}
+            className="w-full rounded-xl border border-[var(--border)] bg-white/5 py-2 pl-9 pr-3 text-sm outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+        <span className="text-xs text-[var(--muted)]">{filteredCats.length}</span>
+      </div>
+
       <div className="no-scrollbar -mx-1 mb-6 flex gap-2 overflow-x-auto px-1 pb-1">
         <button className="chip" data-active={category === ""} onClick={() => pickCategory("")}>
           {t("common.all")}
         </button>
-        {cats.data?.categories.map((c: Category) => (
+        {filteredCats.map((c: Category) => (
           <button
             key={c.id}
             className="chip"
@@ -132,6 +156,9 @@ export function CatalogPage({
             {c.name}
           </button>
         ))}
+        {filteredCats.length === 0 && (
+          <span className="px-2 py-1.5 text-xs text-[var(--muted)]">—</span>
+        )}
       </div>
 
       {query.isLoading ? (

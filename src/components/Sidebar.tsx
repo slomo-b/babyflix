@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Film, Home, Radio, Search, Settings, Tv, Wifi } from "lucide-react";
+import { Film, Heart, Home, Radio, Search, Settings, Tv, Wifi } from "lucide-react";
 import { useT } from "../lib/i18n";
 
 const nav = [
@@ -8,6 +8,7 @@ const nav = [
   { to: "/series", key: "nav.series", icon: Tv },
   { to: "/live", key: "nav.live", icon: Radio },
   { to: "/search", key: "nav.search", icon: Search },
+  { to: "/watchlist", key: "nav.watchlist", icon: Heart },
   { to: "/settings", key: "nav.settings", icon: Settings },
 ];
 

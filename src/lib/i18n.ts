@@ -47,6 +47,7 @@ const de: Record<string, string> = {
   "nav.live": "Live-TV",
   "nav.search": "Suche",
   "nav.settings": "Einstellungen",
+  "nav.watchlist": "Merkliste",
   "sidebar.tagline": "Streaming",
   "sidebar.notSignedIn": "Nicht angemeldet",
 
@@ -104,6 +105,7 @@ const de: Record<string, string> = {
 
   // catalog
   "catalog.filter": "Filtern…",
+  "catalog.searchCategories": "Kategorien suchen…",
   "catalog.sort.added": "Zuletzt hinzugefügt",
   "catalog.sort.name": "Name (A–Z)",
   "catalog.sort.rating": "Bewertung",
@@ -157,6 +159,9 @@ const de: Record<string, string> = {
 
   // settings
   "settings.title": "Einstellungen",
+  "watchlist.title": "Merkliste",
+  "watchlist.subtitle": "Deine gemerkten Titel",
+  "watchlist.empty": "Noch nichts gemerkt. Füge Titel über „Zur Merkliste“ in der Detailansicht hinzu.",
   "settings.account": "Konto & Server",
   "settings.source": "Quelle",
   "settings.sourceXtream": "Xtream Codes",
@@ -195,6 +200,12 @@ const de: Record<string, string> = {
   // player
   "player.live": "Live",
   "player.close": "Schließen",
+  "player.tracks": "Spuren",
+  "player.audio": "Ton",
+  "player.subtitles": "Untertitel",
+  "player.subtitleOff": "Aus",
+  "player.quality": "Qualität",
+  "player.auto": "Automatisch",
   "player.streamError":
     "Stream konnte nicht geladen werden. Der Sender/Film ist evtl. gerade nicht verfügbar.",
 
@@ -222,6 +233,7 @@ const en: Record<string, string> = {
   "nav.live": "Live TV",
   "nav.search": "Search",
   "nav.settings": "Settings",
+  "nav.watchlist": "Watchlist",
   "sidebar.tagline": "Streaming",
   "sidebar.notSignedIn": "Not signed in",
 
@@ -273,6 +285,7 @@ const en: Record<string, string> = {
   "hero.recommended": "Recommended",
 
   "catalog.filter": "Filter…",
+  "catalog.searchCategories": "Search categories…",
   "catalog.sort.added": "Recently added",
   "catalog.sort.name": "Name (A–Z)",
   "catalog.sort.rating": "Rating",
@@ -321,6 +334,9 @@ const en: Record<string, string> = {
   "detail.episodes": "Episodes",
 
   "settings.title": "Settings",
+  "watchlist.title": "Watchlist",
+  "watchlist.subtitle": "Your saved titles",
+  "watchlist.empty": "Nothing saved yet. Add titles via “Add to watchlist” on the detail page.",
   "settings.account": "Account & server",
   "settings.source": "Source",
   "settings.sourceXtream": "Xtream Codes",
@@ -358,6 +374,12 @@ const en: Record<string, string> = {
 
   "player.live": "Live",
   "player.close": "Close",
+  "player.tracks": "Tracks",
+  "player.audio": "Audio",
+  "player.subtitles": "Subtitles",
+  "player.subtitleOff": "Off",
+  "player.quality": "Quality",
+  "player.auto": "Auto",
   "player.streamError": "Stream could not be loaded. The channel/movie may be unavailable right now.",
 
   "rating.imdb": "IMDb rating",

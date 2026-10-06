@@ -14,6 +14,7 @@ import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Live from "./pages/Live";
 import Search from "./pages/Search";
+import Watchlist from "./pages/Watchlist";
 import Detail from "./pages/Detail";
 import Settings from "./pages/Settings";
 
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="/series" element={<Series />} />
             <Route path="/live" element={<Live />} />
             <Route path="/search" element={<Search />} />
+            <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/movie/:id" element={<Detail kind="movie" />} />
             <Route path="/series/:id" element={<Detail kind="series" />} />
             <Route path="/settings" element={<Settings />} />

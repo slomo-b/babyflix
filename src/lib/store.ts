@@ -33,6 +33,14 @@ export interface HistoryItem {
   updatedAt: number;
 }
 
+export interface FavoriteItem {
+  key: string;
+  kind: "movie" | "series" | "live";
+  id: string;
+  name: string;
+  poster?: string;
+}
+
 export interface SavedLogin {
   mode: "xtream" | "m3u";
   baseUrl: string;
@@ -46,8 +54,8 @@ interface AppStore {
   play: (r: PlayRequest) => void;
   stop: () => void;
 
-  favorites: string[];
-  toggleFavorite: (key: string) => void;
+  favorites: FavoriteItem[];
+  toggleFavorite: (item: FavoriteItem) => void;
   isFavorite: (key: string) => boolean;
 
   history: HistoryItem[];
@@ -71,13 +79,13 @@ export const useStore = create<AppStore>()(
       stop: () => set({ current: null }),
 
       favorites: [],
-      toggleFavorite: (key) =>
+      toggleFavorite: (item) =>
         set((s) => ({
-          favorites: s.favorites.includes(key)
-            ? s.favorites.filter((k) => k !== key)
-            : [...s.favorites, key],
+          favorites: s.favorites.some((f) => f.key === item.key)
+            ? s.favorites.filter((f) => f.key !== item.key)
+            : [item, ...s.favorites],
         })),
-      isFavorite: (key) => get().favorites.includes(key),
+      isFavorite: (key) => get().favorites.some((f) => f.key === key),
 
       history: [],
       saveHistory: (h) =>
@@ -96,6 +104,14 @@ export const useStore = create<AppStore>()(
     }),
     {
       name: "babyflix-store",
+      version: 2,
+      migrate: (state, version) => {
+        // v0/v1 stored favorites as a string[]; reset them to objects.
+        if (version < 2) {
+          return { ...(state as Record<string, unknown>), favorites: [] } as unknown as AppStore;
+        }
+        return state as AppStore;
+      },
       partialize: (s) => ({
         history: s.history,
         favorites: s.favorites,

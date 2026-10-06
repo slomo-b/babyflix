@@ -7,6 +7,7 @@ import {
   Minimize,
   Pause,
   Play,
+  Settings2,
   SkipForward,
   Volume2,
   VolumeX,
@@ -16,6 +17,38 @@ import { playerUrl } from "../lib/api";
 import { useStore } from "../lib/store";
 import { fmtTime } from "../lib/format";
 import { useT } from "../lib/i18n";
+
+interface TrackInfo {
+  name: string;
+  lang?: string;
+}
+interface LevelInfo {
+  height?: number;
+  bitrate?: number;
+}
+
+const LANGS: Record<string, string> = {
+  de: "Deutsch",
+  en: "English",
+  fr: "Français",
+  es: "Español",
+  it: "Italiano",
+  nl: "Nederlands",
+  pl: "Polski",
+  tr: "Türkçe",
+  ru: "Русский",
+  ar: "العربية",
+  pt: "Português",
+  sv: "Svenska",
+  da: "Dansk",
+  cs: "Čeština",
+  el: "Ελληνικά",
+};
+
+function langName(code?: string): string {
+  if (!code) return "";
+  return LANGS[code.toLowerCase().slice(0, 2)] || code.toUpperCase();
+}
 
 export function Player() {
   const t = useT();
@@ -42,11 +75,30 @@ export function Player() {
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
+  // track selection
+  const [tracksOpen, setTracksOpen] = useState(false);
+  const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([]);
+  const [audioIndex, setAudioIndex] = useState(-1);
+  const [subtitleTracks, setSubtitleTracks] = useState<TrackInfo[]>([]);
+  const [subtitleIndex, setSubtitleIndex] = useState(-1);
+  const [levels, setLevels] = useState<LevelInfo[]>([]);
+  const [levelIndex, setLevelIndex] = useState(-1);
+
   const streamKey = current ? `${current.kind}:${current.id}` : "";
 
   const cleanup = useCallback(() => {
     hlsRef.current?.destroy();
     hlsRef.current = null;
+  }, []);
+
+  const resetTracks = useCallback(() => {
+    setAudioTracks([]);
+    setAudioIndex(-1);
+    setSubtitleTracks([]);
+    setSubtitleIndex(-1);
+    setLevels([]);
+    setLevelIndex(-1);
+    setTracksOpen(false);
   }, []);
 
   // load stream
@@ -57,6 +109,7 @@ export function Player() {
     setLoading(true);
     setPosition(0);
     setDuration(0);
+    resetTracks();
     cleanup();
 
     const url = playerUrl(current.kind, current.id, current.ext);
@@ -76,8 +129,26 @@ export function Player() {
         enableWorker: true,
       });
       hlsRef.current = hls;
+
+      const refreshTracks = () => {
+        setAudioTracks((hls.audioTracks || []).map((a) => ({ name: a.name || a.lang || "Audio", lang: a.lang })));
+        setAudioIndex(hls.audioTrack ?? -1);
+        setSubtitleTracks(
+          (hls.subtitleTracks || []).map((s) => ({ name: s.name || s.lang || "Subtitle", lang: s.lang }))
+        );
+        setSubtitleIndex(hls.subtitleTrack ?? -1);
+        setLevels((hls.levels || []).map((l) => ({ height: l.height, bitrate: l.bitrate })));
+      };
+
       hls.attachMedia(video);
       hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(url));
+      hls.on(Hls.Events.MANIFEST_PARSED, refreshTracks);
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTracks);
+      hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTracks);
+      hls.on(Hls.Events.LEVELS_UPDATED, refreshTracks);
+      hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => setSubtitleIndex(hls.subtitleTrack));
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => setAudioIndex(hls.audioTrack));
+      hls.on(Hls.Events.LEVEL_SWITCHED, () => setLevelIndex(hls.autoLevelEnabled ? -1 : hls.currentLevel));
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
@@ -96,6 +167,15 @@ export function Player() {
     const onLoaded = () => {
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       setLoading(false);
+      if (!hlsRef.current) {
+        // native playback: expose embedded text tracks as subtitles
+        const subs: TrackInfo[] = [];
+        for (let i = 0; i < video.textTracks.length; i++) {
+          const tt = video.textTracks[i];
+          subs.push({ name: tt.label || tt.language || `Track ${i + 1}`, lang: tt.language });
+        }
+        if (subs.length) setSubtitleTracks(subs);
+      }
       if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
         video.currentTime = resume.position;
       }
@@ -175,6 +255,33 @@ export function Player() {
     else el.requestFullscreen().catch(() => {});
   }, []);
 
+  const selectAudio = (i: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = i;
+      setAudioIndex(i);
+    }
+  };
+  const selectSubtitle = (i: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.subtitleTrack = i;
+      setSubtitleIndex(i);
+    } else {
+      const v = videoRef.current;
+      if (v) {
+        for (let k = 0; k < v.textTracks.length; k++) {
+          v.textTracks[k].mode = k === i ? "showing" : "disabled";
+        }
+      }
+      setSubtitleIndex(i);
+    }
+  };
+  const selectLevel = (i: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = i;
+      setLevelIndex(i);
+    }
+  };
+
   // keyboard
   useEffect(() => {
     if (!current) return;
@@ -203,13 +310,14 @@ export function Player() {
           setMuted((m) => !m);
           break;
         case "Escape":
-          if (!document.fullscreenElement) close();
+          if (tracksOpen) setTracksOpen(false);
+          else if (!document.fullscreenElement) close();
           break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, toggle, seek, toggleFullscreen, close]);
+  }, [current, toggle, seek, toggleFullscreen, close, tracksOpen]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -237,6 +345,7 @@ export function Player() {
 
   const isLive = current.kind === "live";
   const pct = duration > 0 ? (position / duration) * 100 : 0;
+  const hasTracks = audioTracks.length > 1 || subtitleTracks.length > 0 || levels.length > 1;
 
   return (
     <div
@@ -329,6 +438,55 @@ export function Player() {
         <Play size={34} fill="currentColor" />
       </button>
 
+      {/* track panel */}
+      {tracksOpen && (
+        <div className="absolute bottom-24 right-4 z-10 max-h-[60vh] w-72 overflow-y-auto rounded-2xl border border-white/10 bg-[#14161f]/95 p-3 text-sm shadow-2xl backdrop-blur">
+          <div className="mb-2 text-xs font-bold uppercase tracking-widest text-white/50">
+            {t("player.tracks")}
+          </div>
+
+          {audioTracks.length > 1 && (
+            <TrackGroup title={t("player.audio")}>
+              {audioTracks.map((a, i) => (
+                <TrackRow key={i} active={i === audioIndex} onClick={() => selectAudio(i)}>
+                  {a.name}
+                  {langName(a.lang) ? ` (${langName(a.lang)})` : ""}
+                </TrackRow>
+              ))}
+            </TrackGroup>
+          )}
+
+          {subtitleTracks.length > 0 && (
+            <TrackGroup title={t("player.subtitles")}>
+              <TrackRow active={subtitleIndex === -1} onClick={() => selectSubtitle(-1)}>
+                {t("player.subtitleOff")}
+              </TrackRow>
+              {subtitleTracks.map((s, i) => (
+                <TrackRow key={i} active={i === subtitleIndex} onClick={() => selectSubtitle(i)}>
+                  {s.name}
+                  {langName(s.lang) ? ` (${langName(s.lang)})` : ""}
+                </TrackRow>
+              ))}
+            </TrackGroup>
+          )}
+
+          {levels.length > 1 && (
+            <TrackGroup title={t("player.quality")}>
+              <TrackRow active={levelIndex === -1} onClick={() => selectLevel(-1)}>
+                {t("player.auto")}
+              </TrackRow>
+              {levels.map((l, i) => (
+                <TrackRow key={i} active={i === levelIndex} onClick={() => selectLevel(i)}>
+                  {l.height ? `${l.height}p` : `${Math.round((l.bitrate ?? 0) / 1000)} kbps`}
+                </TrackRow>
+              ))}
+            </TrackGroup>
+          )}
+
+          {!hasTracks && <div className="px-1 py-2 text-white/60">—</div>}
+        </div>
+      )}
+
       {/* bottom controls */}
       <div
         className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-5 pb-5 pt-16 transition-opacity duration-300 ${
@@ -357,9 +515,7 @@ export function Player() {
                 }}
               />
             </div>
-            <span className="w-14 text-xs tabular-nums text-white/70">
-              {fmtTimeClock(duration)}
-            </span>
+            <span className="w-14 text-xs tabular-nums text-white/70">{fmtTimeClock(duration)}</span>
           </div>
         )}
 
@@ -396,6 +552,15 @@ export function Player() {
           </div>
 
           <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => setTracksOpen((o) => !o)}
+              className={`transition ${
+                tracksOpen ? "text-[var(--accent-2)]" : "text-white/80 hover:text-white"
+              }`}
+              title={t("player.tracks")}
+            >
+              <Settings2 size={22} />
+            </button>
             <span className="hidden text-[11px] font-medium text-white/50 sm:block">
               {isLive ? fmtTime(new Date().getTime() / 1000) : ""}
             </span>
@@ -406,6 +571,39 @@ export function Player() {
         </div>
       </div>
     </div>
+  );
+}
+
+function TrackGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3">
+      <div className="mb-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-white/40">
+        {title}
+      </div>
+      <div className="flex flex-col">{children}</div>
+    </div>
+  );
+}
+
+function TrackRow({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
+        active ? "bg-[var(--accent)]/25 text-white" : "text-white/85 hover:bg-white/10"
+      }`}
+    >
+      <span className="truncate">{children}</span>
+      {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent-2)]" />}
+    </button>
   );
 }
 

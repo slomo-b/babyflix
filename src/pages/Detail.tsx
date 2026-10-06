@@ -18,7 +18,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   const [seasonIdx, setSeasonIdx] = useState(0);
 
   const favKey = `${kind}:${id}`;
-  const isFav = favorites.includes(favKey);
+  const isFav = favorites.some((f) => f.key === favKey);
 
   const query = useQuery({
     queryKey: ["detail", kind, id],
@@ -208,7 +208,15 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
               )}
               <button
                 className={`btn btn-ghost ${detail?.trailer ? "" : "col-span-2"}`}
-                onClick={() => toggleFavorite(favKey)}
+                onClick={() =>
+                  toggleFavorite({
+                    key: favKey,
+                    kind,
+                    id: item.id,
+                    name: item.name,
+                    poster: item.cover ?? imdb?.image ?? undefined,
+                  })
+                }
               >
                 <Heart
                   size={17}

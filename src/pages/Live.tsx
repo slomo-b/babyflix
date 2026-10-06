@@ -76,6 +76,7 @@ export default function Live() {
           onChange={setCategory}
           ariaLabel={t("live.allCategories")}
           className="w-56"
+          searchable
           options={[
             { value: "", label: t("live.allCategories") },
             ...(cats.data?.categories ?? []).map((c) => ({ value: c.id, label: c.name })),
