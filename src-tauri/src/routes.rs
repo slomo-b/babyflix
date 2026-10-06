@@ -627,18 +627,17 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
     let key = format!("{}:{}:{}:{}", q.kind, q.id, ext, q.audio.unwrap_or(0));
     let audio = q.audio;
     let app2 = app.clone();
-    let (token, duration) = tokio::task::spawn_blocking(move || -> anyhow::Result<(String, Option<f64>)> {
-        let d = app2.remux.duration_secs(&url);
-        let t = app2.remux.start(&key, &url, audio)?;
-        Ok((t, d))
-    })
-    .await
-    .map_err(|e| ApiError(e.to_string()))?
-    .map_err(ApiError::from)?;
+    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
     Ok(Json(json!({
-        "token": token,
-        "playlist": format!("/api/hls/{token}/index.m3u8"),
-        "duration": duration,
+        "token": res.token,
+        "playlist": format!("/api/hls/{}/index.m3u8", res.token),
+        "duration": res.duration,
+        "audio": res.streams.get("audio").cloned().unwrap_or(Value::Null),
+        "video": res.streams.get("video").cloned().unwrap_or(Value::Null),
+        "subtitle": res.streams.get("subtitle").cloned().unwrap_or(Value::Null),
     })))
 }
 

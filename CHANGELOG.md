@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.9] — 2026-10-06
+
+### Fixed
+- The player **track menu** now always shows audio tracks for movies and series: VOD is always
+  remuxed, and the stream/audio info is returned from the same FFprobe pass (fewer server
+  connections, important for lines with a single connection).
+
 ## [1.0.8] — 2026-10-06
 
 ### Fixed

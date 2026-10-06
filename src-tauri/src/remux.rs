@@ -1,5 +1,6 @@
-//! On-the-fly FFmpeg remux to HLS for containers the webview cannot play (e.g. MKV).
-//! FFmpeg writes an HLS playlist + segments into a temp dir which we serve over HTTP.
+//! On-the-fly FFmpeg remux to HLS for VOD playback.
+//! Used for every movie/series so that: containers the webview cannot play (MKV, AVI, …) work,
+//! audio codecs are normalised (e.g. DTS/AC3 -> AAC) and all audio tracks are selectable.
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,6 +16,12 @@ struct Session {
     dir: PathBuf,
     key: String,
     last: Instant,
+}
+
+pub struct RemuxStart {
+    pub token: String,
+    pub duration: Option<f64>,
+    pub streams: Value,
 }
 
 pub struct Remux {
@@ -62,6 +69,48 @@ fn now_nanos() -> u128 {
         .unwrap_or(0)
 }
 
+fn streams_from(v: &Value) -> Value {
+    let mut audio = Vec::new();
+    let mut video = Vec::new();
+    let mut subtitle = Vec::new();
+    if let Some(streams) = v.get("streams").and_then(|s| s.as_array()) {
+        for s in streams {
+            let ty = s.get("codec_type").and_then(|x| x.as_str()).unwrap_or("");
+            let entry = serde_json::json!({
+                "index": s.get("index").and_then(|x| x.as_i64()),
+                "codec": s.get("codec_name").and_then(|x| x.as_str()),
+                "lang": s.get("tags").and_then(|t| t.get("language")).and_then(|x| x.as_str()),
+                "title": s.get("tags").and_then(|t| t.get("title")).and_then(|x| x.as_str()),
+                "channels": s.get("channels").and_then(|x| x.as_i64()),
+                "width": s.get("width").and_then(|x| x.as_i64()),
+                "height": s.get("height").and_then(|x| x.as_i64()),
+            });
+            match ty {
+                "audio" => audio.push(entry),
+                "video" => video.push(entry),
+                "subtitle" => subtitle.push(entry),
+                _ => {}
+            }
+        }
+    }
+    serde_json::json!({ "audio": audio, "video": video, "subtitle": subtitle })
+}
+
+fn duration_of(v: &Value) -> Option<f64> {
+    v.get("format")
+        .and_then(|f| f.get("duration"))
+        .and_then(|d| d.as_str())
+        .and_then(|s| s.trim().parse::<f64>().ok())
+}
+
+fn stream_codec(list: &Value, idx: usize) -> Option<String> {
+    list.as_array()?
+        .get(idx)?
+        .get("codec")?
+        .as_str()
+        .map(|s| s.to_lowercase())
+}
+
 impl Remux {
     pub fn new(root: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&root);
@@ -76,18 +125,6 @@ impl Remux {
 
     pub fn available(&self) -> bool {
         self.ffmpeg.is_some()
-    }
-
-    fn probe_value(&self, args: &[&str]) -> Option<String> {
-        let ffprobe = self.ffprobe.as_ref()?;
-        let mut cmd = Command::new(ffprobe);
-        cmd.arg("-v").arg("error").args(args).arg("-user_agent").arg(UA);
-        hidden(&mut cmd);
-        let out = cmd.output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
     fn probe_json(&self, url: &str) -> Option<Value> {
@@ -110,69 +147,15 @@ impl Remux {
         serde_json::from_slice(&out.stdout).ok()
     }
 
-    fn video_codec(&self, url: &str) -> String {
-        self.probe_value(&[
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=codec_name",
-            "-of",
-            "default=nk=1:nw=1",
-            url,
-        ])
-        .map(|s| s.lines().next().unwrap_or("").trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "h264".into())
-    }
-
     pub fn probe_streams(&self, url: &str) -> Result<Value> {
-        let v = self
-            .probe_json(url)
-            .ok_or_else(|| anyhow!("ffprobe failed"))?;
-        let mut audio = Vec::new();
-        let mut video = Vec::new();
-        let mut subtitle = Vec::new();
-        let duration = v
-            .get("format")
-            .and_then(|f| f.get("duration"))
-            .and_then(|d| d.as_str())
-            .and_then(|s| s.trim().parse::<f64>().ok());
-        if let Some(streams) = v.get("streams").and_then(|s| s.as_array()) {
-            for s in streams {
-                let ty = s.get("codec_type").and_then(|x| x.as_str()).unwrap_or("");
-                let entry = serde_json::json!({
-                    "index": s.get("index").and_then(|x| x.as_i64()),
-                    "codec": s.get("codec_name").and_then(|x| x.as_str()),
-                    "lang": s.get("tags").and_then(|t| t.get("language")).and_then(|x| x.as_str()),
-                    "title": s.get("tags").and_then(|t| t.get("title")).and_then(|x| x.as_str()),
-                    "channels": s.get("channels").and_then(|x| x.as_i64()),
-                    "width": s.get("width").and_then(|x| x.as_i64()),
-                    "height": s.get("height").and_then(|x| x.as_i64()),
-                });
-                match ty {
-                    "audio" => audio.push(entry),
-                    "video" => video.push(entry),
-                    "subtitle" => subtitle.push(entry),
-                    _ => {}
-                }
-            }
-        }
-        Ok(serde_json::json!({ "audio": audio, "video": video, "subtitle": subtitle, "duration": duration }))
+        let v = self.probe_json(url).ok_or_else(|| anyhow!("ffprobe failed"))?;
+        let mut out = streams_from(&v);
+        out["duration"] = serde_json::json!(duration_of(&v));
+        Ok(out)
     }
 
-    pub fn duration_secs(&self, url: &str) -> Option<f64> {
-        self.probe_value(&[
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nk=1:nw=1",
-            url,
-        ])
-        .and_then(|s| s.lines().next().and_then(|l| l.trim().parse::<f64>().ok()))
-    }
-
-    /// Start (or reuse) a remux session; returns the token.
-    pub fn start(&self, key: &str, url: &str, audio: Option<usize>) -> Result<String> {
+    /// Start (or reuse) a remux session; returns the token, duration and stream info.
+    pub fn start(&self, key: &str, url: &str, audio: Option<usize>) -> Result<RemuxStart> {
         let ffmpeg = self.ffmpeg.clone().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
         // Reuse an existing session for the exact key.
@@ -182,7 +165,15 @@ impl Remux {
                 let mut s = self.sessions.lock().unwrap();
                 if let Some(sess) = s.get_mut(tok) {
                     sess.last = Instant::now();
-                    return Ok(tok.clone());
+                    let tok2 = tok.clone();
+                    drop(s);
+                    let info = self.probe_json(url);
+                    let streams = info
+                        .as_ref()
+                        .map(streams_from)
+                        .unwrap_or_else(|| serde_json::json!({"audio":[],"video":[],"subtitle":[]}));
+                    let duration = info.as_ref().and_then(duration_of);
+                    return Ok(RemuxStart { token: tok2, duration, streams });
                 }
             }
         }
@@ -207,11 +198,19 @@ impl Remux {
             self.stop(&t);
         }
 
+        let info = self.probe_json(url);
+        let streams = info
+            .as_ref()
+            .map(streams_from)
+            .unwrap_or_else(|| serde_json::json!({"audio":[],"video":[],"subtitle":[]}));
+        let duration = info.as_ref().and_then(duration_of);
+        let vcodec = stream_codec(&streams["video"], 0).unwrap_or_else(|| "h264".into());
+        let acodec = stream_codec(&streams["audio"], audio.unwrap_or(0));
+
         let token = format!("{:x}{:x}", std::process::id(), now_nanos());
         let dir = self.root.join(&token);
         std::fs::create_dir_all(&dir)?;
 
-        let codec = self.video_codec(url);
         let mut cmd = Command::new(&ffmpeg);
         cmd.arg("-hide_banner")
             .arg("-loglevel")
@@ -225,12 +224,20 @@ impl Remux {
             .arg("0:v:0")
             .arg("-map")
             .arg(format!("0:a:{}", audio.unwrap_or(0)));
-        if codec == "h264" {
+        if vcodec == "h264" {
             cmd.arg("-c:v").arg("copy");
         } else {
             cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]);
         }
-        cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k", "-sn"])
+        match acodec.as_deref() {
+            Some("aac") | Some("mp3") => {
+                cmd.arg("-c:a").arg("copy");
+            }
+            _ => {
+                cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
+            }
+        }
+        cmd.arg("-sn")
             .args([
                 "-f",
                 "hls",
@@ -262,7 +269,7 @@ impl Remux {
             },
         );
         self.keys.lock().unwrap().insert(key.to_string(), token.clone());
-        Ok(token)
+        Ok(RemuxStart { token, duration, streams })
     }
 
     pub fn touch(&self, token: &str) {

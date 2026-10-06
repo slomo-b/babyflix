@@ -58,8 +58,7 @@ function isGermanTrack(lang?: string | null, title?: string | null): boolean {
   return t.includes("deutsch") || t.includes("german");
 }
 
-// Containers the webview can play directly.
-const BROWSER_CONTAINERS = ["mp4", "m4v", "webm", "ogv", "ogg"];
+// Containers the webview can play directly (not used for VOD: we always remux there).
 
 export function Player() {
   const appLang = useLang((s) => s.lang);
@@ -142,7 +141,8 @@ export function Player() {
 
     const ext = (current.ext || "").toLowerCase();
     const isVod = current.kind !== "live";
-    const wantRemux = isVod && (forceRemux || (ext !== "" && !BROWSER_CONTAINERS.includes(ext)));
+    // Always remux VOD so every container/codec plays and all tracks are available.
+    const wantRemux = isVod;
     remuxRef.current = wantRemux;
 
     const directUrl = playerUrl(current.kind, current.id, current.ext);
@@ -190,26 +190,20 @@ export function Player() {
       if (wantRemux) {
         try {
           let audioIdx = remuxAudio;
+          let preAudio: { lang?: string | null; title?: string | null; codec?: string | null }[] = [];
           if (!autoAudioRef.current) {
-            autoAudioRef.current = true;
             try {
               const info = await api.streams(current.kind, current.id, current.ext);
               if (cancelled) return;
-              if (info.audio?.length) {
-                setAudioTracks(
-                  info.audio.map((a, i) => ({
-                    name: a.title || a.codec || `Audio ${i + 1}`,
-                    lang: a.lang ?? undefined,
-                  }))
-                );
-                if (appLang === "de") {
-                  const gi = info.audio.findIndex((a) => isGermanTrack(a.lang, a.title));
-                  if (gi >= 0) audioIdx = gi;
-                }
+              preAudio = info.audio ?? [];
+              if (appLang === "de" && preAudio.length) {
+                const gi = preAudio.findIndex((a) => isGermanTrack(a.lang, a.title));
+                if (gi >= 0) audioIdx = gi;
               }
             } catch {
               /* ignore */
             }
+            autoAudioRef.current = true;
           }
           const res = await api.remux(current.kind, current.id, current.ext, audioIdx);
           if (cancelled) {
@@ -218,6 +212,15 @@ export function Player() {
           }
           sessionToken = res.token;
           remuxTokenRef.current = res.token;
+          const audio = res.audio && res.audio.length ? res.audio : preAudio;
+          if (audio.length) {
+            setAudioTracks(
+              audio.map((a, i) => ({
+                name: a.title || a.codec || `Audio ${i + 1}`,
+                lang: a.lang ?? undefined,
+              }))
+            );
+          }
           setAudioIndex(audioIdx);
           if (res.duration && res.duration > 0) setDuration(res.duration);
           setupHls(API_BASE + res.playlist, () => setError(true));

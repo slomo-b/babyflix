@@ -246,9 +246,14 @@ export const api = {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);
     if (audio != null) sp.set("audio", String(audio));
-    return req<{ token: string; playlist: string; duration: number | null }>(
-      `/api/remux?${sp.toString()}`
-    );
+    return req<{
+      token: string;
+      playlist: string;
+      duration: number | null;
+      audio: StreamInfo[];
+      video: StreamInfo[];
+      subtitle: StreamInfo[];
+    }>(`/api/remux?${sp.toString()}`);
   },
   remuxStop: (token: string) =>
     req<{ ok: boolean }>(`/api/remux/stop?token=${encodeURIComponent(token)}`).catch(() => ({ ok: false })),
