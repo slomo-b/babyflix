@@ -150,6 +150,10 @@ const de: Record<string, string> = {
   "detail.season": "Staffel {n}",
   "detail.noSeasonEpisodes": "Für diese Staffel sind keine Episoden hinterlegt.",
   "detail.loadError": "Details konnten nicht geladen werden:",
+  "detail.overview": "Handlung",
+  "detail.directorTitle": "Regie",
+  "detail.castTitle": "Besetzung",
+  "detail.episodes": "Folgen",
 
   // settings
   "settings.title": "Einstellungen",
@@ -311,6 +315,10 @@ const en: Record<string, string> = {
   "detail.season": "Season {n}",
   "detail.noSeasonEpisodes": "No episodes available for this season.",
   "detail.loadError": "Could not load details:",
+  "detail.overview": "Overview",
+  "detail.directorTitle": "Director",
+  "detail.castTitle": "Cast",
+  "detail.episodes": "Episodes",
 
   "settings.title": "Settings",
   "settings.account": "Account & server",

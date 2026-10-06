@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5] — 2026-10-06
+
+### Changed
+- **Redesigned the detail view** for movies and series: larger hero backdrop, a big poster card,
+  a highlighted IMDb rating badge, genre pills, an overview section, director/cast chips and a
+  nicer episode list with a season picker.
+
 ## [1.0.4] — 2026-10-05
 
 ### Fixed
