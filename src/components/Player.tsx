@@ -13,7 +13,8 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { playerUrl } from "../lib/api";
+import { API_BASE, playerUrl } from "../lib/api";
+import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { fmtTime } from "../lib/format";
 import { useT } from "../lib/i18n";
@@ -50,6 +51,9 @@ function langName(code?: string): string {
   return LANGS[code.toLowerCase().slice(0, 2)] || code.toUpperCase();
 }
 
+// Containers the webview can play directly.
+const BROWSER_CONTAINERS = ["mp4", "m4v", "webm", "ogv", "ogg"];
+
 export function Player() {
   const t = useT();
   const current = useStore((s) => s.current);
@@ -62,6 +66,8 @@ export function Player() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const remuxRef = useRef(false);
+  const remuxTokenRef = useRef<string | null>(null);
   const hideTimer = useRef<number | null>(null);
   const lastSave = useRef(0);
 
@@ -84,6 +90,10 @@ export function Player() {
   const [levels, setLevels] = useState<LevelInfo[]>([]);
   const [levelIndex, setLevelIndex] = useState(-1);
 
+  // remux (FFmpeg) options
+  const [remuxAudio, setRemuxAudio] = useState(0);
+  const [forceRemux, setForceRemux] = useState(false);
+
   const streamKey = current ? `${current.kind}:${current.id}` : "";
 
   const cleanup = useCallback(() => {
@@ -101,6 +111,12 @@ export function Player() {
     setTracksOpen(false);
   }, []);
 
+  // reset per-stream options when the stream changes
+  useEffect(() => {
+    setRemuxAudio(0);
+    setForceRemux(false);
+  }, [streamKey]);
+
   // load stream
   useEffect(() => {
     const video = videoRef.current;
@@ -111,17 +127,17 @@ export function Player() {
     setDuration(0);
     resetTracks();
     cleanup();
+    let cancelled = false;
+    let sessionToken: string | null = null;
 
-    const url = playerUrl(current.kind, current.id, current.ext);
     const ext = (current.ext || "").toLowerCase();
-    const useHls = current.kind === "live" || ext.includes("m3u8") || ext === "";
+    const isVod = current.kind !== "live";
+    const wantRemux = isVod && (forceRemux || (ext !== "" && !BROWSER_CONTAINERS.includes(ext)));
+    remuxRef.current = wantRemux;
 
-    const attachNative = () => {
-      video.src = url;
-      video.load();
-    };
+    const directUrl = playerUrl(current.kind, current.id, current.ext);
 
-    if (useHls && Hls.isSupported()) {
+    const setupHls = (src: string, onFatal: () => void) => {
       const hls = new Hls({
         lowLatencyMode: current.kind === "live",
         backBufferLength: 90,
@@ -129,7 +145,6 @@ export function Player() {
         enableWorker: true,
       });
       hlsRef.current = hls;
-
       const refreshTracks = () => {
         setAudioTracks((hls.audioTracks || []).map((a) => ({ name: a.name || a.lang || "Audio", lang: a.lang })));
         setAudioIndex(hls.audioTrack ?? -1);
@@ -139,9 +154,8 @@ export function Player() {
         setSubtitleIndex(hls.subtitleTrack ?? -1);
         setLevels((hls.levels || []).map((l) => ({ height: l.height, bitrate: l.bitrate })));
       };
-
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(url));
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(src));
       hls.on(Hls.Events.MANIFEST_PARSED, refreshTracks);
       hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, refreshTracks);
       hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshTracks);
@@ -150,25 +164,66 @@ export function Player() {
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => setAudioIndex(hls.audioTrack));
       hls.on(Hls.Events.LEVEL_SWITCHED, () => setLevelIndex(hls.autoLevelEnabled ? -1 : hls.currentLevel));
       hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-          else {
-            cleanup();
-            attachNative();
-          }
-        }
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        else onFatal();
       });
-    } else {
-      attachNative();
-    }
+    };
+
+    const attachNative = (src: string) => {
+      video.src = src;
+      video.load();
+    };
+
+    const startPlayback = async () => {
+      if (wantRemux) {
+        try {
+          const res = await api.remux(current.kind, current.id, current.ext, remuxAudio);
+          if (cancelled) {
+            api.remuxStop(res.token);
+            return;
+          }
+          sessionToken = res.token;
+          remuxTokenRef.current = res.token;
+          setAudioIndex(remuxAudio);
+          api
+            .streams(current.kind, current.id, current.ext)
+            .then((info) => {
+              if (!cancelled && info.audio?.length) {
+                setAudioTracks(
+                  info.audio.map((a, i) => ({
+                    name: a.title || a.codec || `Audio ${i + 1}`,
+                    lang: a.lang ?? undefined,
+                  }))
+                );
+              }
+            })
+            .catch(() => {});
+          setupHls(API_BASE + res.playlist, () => setError(true));
+          return;
+        } catch {
+          // FFmpeg unavailable or remux failed -> try direct playback
+        }
+      }
+      const useHls = current.kind === "live" || ext.includes("m3u8") || ext === "";
+      if (useHls && Hls.isSupported()) {
+        setupHls(directUrl, () => {
+          if (isVod && !forceRemux) setForceRemux(true);
+          else setError(true);
+        });
+      } else {
+        attachNative(directUrl);
+      }
+    };
+
+    startPlayback();
 
     const resume = history.find((h) => h.key === current.historyKey);
     const onLoaded = () => {
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       setLoading(false);
       if (!hlsRef.current) {
-        // native playback: expose embedded text tracks as subtitles
         const subs: TrackInfo[] = [];
         for (let i = 0; i < video.textTracks.length; i++) {
           const tt = video.textTracks[i];
@@ -189,6 +244,11 @@ export function Player() {
       }
     };
     const onErr = () => {
+      // A direct attempt on an unsupported container -> switch to remux.
+      if (isVod && !remuxRef.current && !forceRemux) {
+        setForceRemux(true);
+        return;
+      }
       setLoading(false);
       setError(true);
     };
@@ -199,15 +259,17 @@ export function Player() {
     const p = video.play();
     if (p && typeof p.catch === "function") p.catch(() => {});
     return () => {
+      cancelled = true;
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("timeupdate", onTime);
       video.removeEventListener("error", onErr);
       cleanup();
       video.removeAttribute("src");
       video.load();
+      if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey]);
+  }, [streamKey, remuxAudio, forceRemux]);
 
   const persist = useCallback(
     (pos: number, dur: number) => {
@@ -256,7 +318,10 @@ export function Player() {
   }, []);
 
   const selectAudio = (i: number) => {
-    if (hlsRef.current) {
+    if (remuxRef.current) {
+      setRemuxAudio(i);
+      setAudioIndex(i);
+    } else if (hlsRef.current) {
       hlsRef.current.audioTrack = i;
       setAudioIndex(i);
     }
@@ -445,7 +510,7 @@ export function Player() {
             {t("player.tracks")}
           </div>
 
-          {audioTracks.length > 1 && (
+          {audioTracks.length > 0 && (
             <TrackGroup title={t("player.audio")}>
               {audioTracks.map((a, i) => (
                 <TrackRow key={i} active={i === audioIndex} onClick={() => selectAudio(i)}>

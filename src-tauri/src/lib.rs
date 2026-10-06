@@ -2,6 +2,7 @@ mod imdb;
 mod m3u;
 mod proxy;
 mod ratings;
+mod remux;
 mod routes;
 mod state;
 mod xtream;
@@ -48,6 +49,15 @@ pub fn run() {
                     eprintln!("[babyflix] autologin skipped: {e}");
                 }
                 boot_state.ensure_ratings();
+            });
+
+            // Reap idle FFmpeg remux sessions.
+            let reap_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    reap_state.remux.reap();
+                }
             });
 
             app.manage(state);

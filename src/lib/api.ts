@@ -141,6 +141,22 @@ export interface DiagResponse {
   results: DiagResult[];
 }
 
+export interface StreamInfo {
+  index: number | null;
+  codec: string | null;
+  lang: string | null;
+  title: string | null;
+  channels: number | null;
+  width: number | null;
+  height: number | null;
+}
+
+export interface StreamsResponse {
+  audio: StreamInfo[];
+  video: StreamInfo[];
+  subtitle: StreamInfo[];
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -225,6 +241,19 @@ export const api = {
       body: JSON.stringify(items),
     }),
   refresh: () => req<{ ok: boolean }>("/api/refresh", { method: "POST" }),
+  remux: (kind: Kind, id: string, ext?: string, audio?: number) => {
+    const sp = new URLSearchParams({ kind, id });
+    if (ext) sp.set("ext", ext);
+    if (audio != null) sp.set("audio", String(audio));
+    return req<{ token: string; playlist: string }>(`/api/remux?${sp.toString()}`);
+  },
+  remuxStop: (token: string) =>
+    req<{ ok: boolean }>(`/api/remux/stop?token=${encodeURIComponent(token)}`).catch(() => ({ ok: false })),
+  streams: (kind: Kind, id: string, ext?: string) => {
+    const sp = new URLSearchParams({ kind, id });
+    if (ext) sp.set("ext", ext);
+    return req<StreamsResponse>(`/api/streams?${sp.toString()}`);
+  },
 };
 
 export function imgUrl(u: string | null | undefined): string | undefined {

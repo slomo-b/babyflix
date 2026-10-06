@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.7] — 2026-10-06
+
+### Added
+- **FFmpeg remux**: movies/series in containers the browser cannot play (e.g. **MKV**) are
+  automatically remuxed to HLS on the fly, so they play in-app (with seeking). FFmpeg is
+  auto-detected on the system.
+- **Audio track selection** for remuxed streams (via FFmpeg).
+
+### Fixed
+- Many titles (especially MKV) that previously showed a black screen with no tracks now play.
+
 ## [1.0.6] — 2026-10-06
 
 ### Added

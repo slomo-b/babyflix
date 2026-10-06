@@ -3,7 +3,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -602,6 +603,116 @@ async fn diagnose(State(app): State<Arc<App>>, Json(req): Json<DiagReq>) -> Json
     Json(json!({ "normalized_base": base, "results": results }))
 }
 
+#[derive(Deserialize)]
+struct RemuxQ {
+    kind: String,
+    id: String,
+    #[serde(default)]
+    ext: Option<String>,
+    #[serde(default)]
+    audio: Option<usize>,
+}
+
+async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    if !app.remux.available() {
+        return Err(ApiError("FFmpeg is not available on this system.".into()));
+    }
+    let ext = q
+        .ext
+        .clone()
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
+    let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
+    let key = format!("{}:{}:{}:{}", q.kind, q.id, ext, q.audio.unwrap_or(0));
+    let audio = q.audio;
+    let app2 = app.clone();
+    let token = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "token": token,
+        "playlist": format!("/api/hls/{token}/index.m3u8"),
+    })))
+}
+
+#[derive(Deserialize)]
+struct StopQ {
+    token: String,
+}
+
+async fn remux_stop(State(app): State<Arc<App>>, Query(q): Query<StopQ>) -> Json<Value> {
+    app.remux.stop(&q.token);
+    Json(json!({ "ok": true }))
+}
+
+#[derive(Deserialize)]
+struct StreamsQ {
+    kind: String,
+    id: String,
+    #[serde(default)]
+    ext: Option<String>,
+}
+
+async fn streams(State(app): State<Arc<App>>, Query(q): Query<StreamsQ>) -> ApiResult {
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    let ext = q
+        .ext
+        .clone()
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
+    let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
+    let app2 = app.clone();
+    let info = tokio::task::spawn_blocking(move || app2.remux.probe_streams(&url))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
+    Ok(Json(info))
+}
+
+async fn hls_file(
+    State(app): State<Arc<App>>,
+    Path((token, file)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    if file.contains('/') || file.contains('\\') || file.contains("..") {
+        return Err(ApiError("Invalid file.".into()));
+    }
+    let dir = app.remux.dir(&token).ok_or(ApiError("Unknown stream.".into()))?;
+    app.remux.touch(&token);
+    let path = dir.join(&file);
+    let mut found = false;
+    for _ in 0..300 {
+        if path.exists() {
+            found = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    if !found {
+        return Err(ApiError("Segment not ready yet.".into()));
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| ApiError(e.to_string()))?;
+    let ct = if file.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if file.ends_with(".ts") {
+        "video/mp2t"
+    } else {
+        "application/octet-stream"
+    };
+    let cache = if file.ends_with(".m3u8") {
+        "no-store"
+    } else {
+        "public, max-age=3600"
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, ct)
+        .header(header::CACHE_CONTROL, cache)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Body::from(bytes))
+        .map_err(|e| ApiError(e.to_string()))
+}
+
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/health", get(health))
@@ -619,6 +730,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/enrich_batch", post(enrich_batch))
         .route("/api/refresh", post(refresh))
         .route("/api/player", get(player))
+        .route("/api/remux", get(remux_start))
+        .route("/api/remux/stop", get(remux_stop))
+        .route("/api/streams", get(streams))
+        .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
         .route("/api/img", get(img_h))
         .layer(CorsLayer::permissive())
