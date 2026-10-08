@@ -42,21 +42,134 @@ fn hidden(cmd: &mut Command) {
     }
 }
 
-fn find_exe(name: &str, env_var: &str) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var(env_var) {
-        let p = PathBuf::from(p);
-        if p.exists() {
-            return Some(p);
+/// File name of an executable on this platform (`ffmpeg` vs `ffmpeg.exe`).
+fn exe_file(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
+}
+
+/// Directories that ship together with the app itself (bundled FFmpeg / sidecar).
+fn beside_app() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+            dirs.push(dir.join("bin"));
+            dirs.push(dir.join("ffmpeg"));
+            #[cfg(target_os = "macos")]
+            if let Some(contents) = dir.parent() {
+                // BabyFlix.app/Contents/{MacOS,Resources,Frameworks}
+                dirs.push(contents.join("Resources"));
+                dirs.push(contents.join("Resources").join("bin"));
+                dirs.push(contents.join("Frameworks"));
+            }
         }
     }
-    let out = Command::new("where").arg(name).output().ok()?;
-    if out.status.success() {
-        let s = String::from_utf8_lossy(&out.stdout);
-        for line in s.lines() {
-            let p = PathBuf::from(line.trim());
-            if p.exists() {
-                return Some(p);
-            }
+    dirs
+}
+
+/// Well-known install locations.
+///
+/// An app started from Finder (macOS) or Explorer (Windows) inherits a minimal PATH -
+/// on macOS it is only `/usr/bin:/bin:/usr/sbin:/sbin`, so Homebrew's
+/// `/opt/homebrew/bin` is invisible to a plain PATH lookup. That is why the app has to
+/// look in the usual install directories itself.
+fn well_known_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        dirs.extend([
+            PathBuf::from("/opt/homebrew/bin"), // Apple Silicon Homebrew
+            PathBuf::from("/usr/local/bin"),    // Intel Homebrew
+            PathBuf::from("/opt/local/bin"),    // MacPorts
+            PathBuf::from("/usr/bin"),
+        ]);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        dirs.extend([
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/snap/bin"),
+            PathBuf::from("/var/lib/flatpak/exports/bin"),
+        ]);
+    }
+    #[cfg(windows)]
+    {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(&local).join("Microsoft").join("WinGet").join("Links"));
+            dirs.push(PathBuf::from(&local).join("Programs").join("ffmpeg").join("bin"));
+        }
+        dirs.extend([
+            PathBuf::from(r"C:\ffmpeg\bin"),
+            PathBuf::from(r"C:\Program Files\ffmpeg\bin"),
+        ]);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(&home).join("bin"));
+        dirs.push(PathBuf::from(&home).join(".local").join("bin"));
+    }
+    dirs
+}
+
+fn from_env(env_var: &str, name: &str) -> Option<PathBuf> {
+    let raw = std::env::var_os(env_var)?;
+    let path = PathBuf::from(raw);
+    if path.is_file() {
+        return Some(path);
+    }
+    if path.is_dir() {
+        let candidate = path.join(exe_file(name));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Look the binary up on PATH: `where` exists only on Windows, `which` on macOS/Linux.
+/// The old implementation called `where` on every platform, which is why FFmpeg was
+/// never found on macOS (and every movie/series failed to start there).
+fn on_path(name: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    const FINDER: &str = "where";
+    #[cfg(not(windows))]
+    const FINDER: &str = "which";
+
+    let out = Command::new(FINDER).arg(name).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|line| PathBuf::from(line.trim()))
+        .find(|p| p.is_file())
+}
+
+/// Find `name` (ffmpeg / ffprobe):
+/// 1. the env override (file *or* directory), 2. next to the app, 3. PATH, 4. usual dirs.
+fn find_exe(name: &str, env_var: &str) -> Option<PathBuf> {
+    let file = exe_file(name);
+    if let Some(p) = from_env(env_var, name) {
+        return Some(p);
+    }
+    for dir in beside_app() {
+        let candidate = dir.join(&file);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    if let Some(p) = on_path(&file) {
+        return Some(p);
+    }
+    for dir in well_known_dirs() {
+        let candidate = dir.join(&file);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None
@@ -114,13 +227,35 @@ fn stream_codec(list: &Value, idx: usize) -> Option<String> {
 impl Remux {
     pub fn new(root: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&root);
+        let ffmpeg = find_exe("ffmpeg", "BABYFLIX_FFMPEG");
+        let ffprobe = find_exe("ffprobe", "BABYFLIX_FFPROBE");
+        match (&ffmpeg, &ffprobe) {
+            (Some(f), Some(p)) => {
+                eprintln!("[babyflix] ffmpeg: {} | ffprobe: {}", f.display(), p.display())
+            }
+            _ => eprintln!(
+                "[babyflix] FFmpeg not found - movies/series cannot be remuxed. Install it \
+                 (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg, \
+                 Linux: apt install ffmpeg) or point BABYFLIX_FFMPEG at the binary."
+            ),
+        }
         Remux {
             root,
-            ffmpeg: find_exe("ffmpeg", "BABYFLIX_FFMPEG"),
-            ffprobe: find_exe("ffprobe", "BABYFLIX_FFPROBE"),
+            ffmpeg,
+            ffprobe,
             sessions: Mutex::new(HashMap::new()),
             keys: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Path of the FFmpeg binary in use (surfaced by `/api/health` for diagnostics).
+    pub fn ffmpeg_path(&self) -> Option<String> {
+        self.ffmpeg.as_ref().map(|p| p.display().to_string())
+    }
+
+    /// Path of the FFprobe binary in use (surfaced by `/api/health` for diagnostics).
+    pub fn ffprobe_path(&self) -> Option<String> {
+        self.ffprobe.as_ref().map(|p| p.display().to_string())
     }
 
     pub fn available(&self) -> bool {

@@ -122,6 +122,9 @@ export interface HealthResponse {
   logged_in: boolean;
   catalog: Record<string, number>;
   ratings_loaded: boolean;
+  /** Path of the FFmpeg binary the backend uses, or null when it is missing. */
+  ffmpeg?: string | null;
+  ffprobe?: string | null;
 }
 
 export interface DiagResult {

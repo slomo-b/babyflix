@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.10] — 2026-10-09
+
+### Fixed
+- **macOS: nothing played at all** (endless spinner, then nothing) while Windows was fine. The app
+  looked for FFmpeg/FFprobe with the Windows-only `where` command, so **no** binary was ever found
+  on macOS/Linux and every movie/series failed to remux. Lookup now uses the
+  `BABYFLIX_FFMPEG` / `BABYFLIX_FFPROBE` overrides, a binary next to the app, `PATH` **and the
+  usual install locations** (`/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`), which also
+  covers Apple-Silicon Homebrew when the app is started from Finder (minimal `PATH`).
+- **macOS: plain-HTTP playback** – added App Transport Security + local-network exemptions
+  (`src-tauri/Info.plist`) so the webview may reach the local proxy and the IPTV panel over HTTP.
+  WebView2 on Windows never needed them, which is why only macOS was affected.
+- **No endless spinner any more**: playback errors are bounded and shown – the player now displays
+  the real reason plus a *Retry* button instead of spinning forever.
+
+### Added
+- **FFmpeg status in the app**: `/api/health` reports the resolved FFmpeg/FFprobe paths and
+  Settings shows a warning banner with install instructions when FFmpeg is missing.
+
 ## [1.0.9] — 2026-10-06
 
 ### Fixed

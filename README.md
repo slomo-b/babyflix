@@ -34,6 +34,37 @@ Everything is cached aggressively on disk. **No API key is required.**
 
 ---
 
+## Requirement: FFmpeg (movies and series)
+
+Live TV plays directly, but **movies and series are remuxed locally with FFmpeg** so that every
+container/codec (MKV, HEVC, AC3/DTS …) plays in the webview and all audio tracks are selectable.
+
+BabyFlix looks for `ffmpeg`/`ffprobe` in this order:
+
+1. `BABYFLIX_FFMPEG` / `BABYFLIX_FFPROBE` (path to the binary **or** to its directory)
+2. next to the app itself (bundled sidecar)
+3. `PATH`
+4. the usual install directories — on macOS `/opt/homebrew/bin` (Apple Silicon),
+   `/usr/local/bin` (Intel), `/opt/local/bin`; on Windows `%LOCALAPPDATA%\Microsoft\WinGet\Links`,
+   `C:\ffmpeg\bin`; on Linux `/usr/local/bin`, `/usr/bin`, `/snap/bin`
+
+Install it once:
+
+```bash
+brew install ffmpeg                      # macOS (Homebrew) — restart the app afterwards
+winget install Gyan.FFmpeg               # Windows
+sudo apt install ffmpeg                  # Linux (Debian/Ubuntu)
+```
+
+> **macOS:** an app started from Finder does **not** inherit your shell `PATH`, so Homebrew's
+> `/opt/homebrew/bin` is invisible to a plain `PATH` lookup. BabyFlix therefore checks the
+> well-known install directories itself — no need to launch it from the terminal.
+
+If FFmpeg is missing, the app now says so right in the player (and in **Settings →
+Catalog**): movies/series cannot be played, live TV still can.
+
+---
+
 ## Getting started (development)
 
 ```bash

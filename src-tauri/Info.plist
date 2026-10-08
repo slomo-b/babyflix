@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  BabyFlix streams everything over plain HTTP through its own local proxy
+	  (http://127.0.0.1:4523) and the IPTV panel is usually reachable over
+	  plain HTTP as well. macOS App Transport Security blocks that by default
+	  in WKWebView, which is why streams never start on macOS while they work
+	  on Windows (WebView2 does not enforce ATS).
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Media/subresource loads from the webview to http:// origins. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<!-- Webview (WKWebView) content, e.g. fetch/XHR and <video> sources. -->
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<!-- localhost / .local / LAN addresses used by the local proxy. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- macOS 15+ asks for local network access; here it is our own loopback proxy. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>BabyFlix uses your local network to reach your IPTV server and to play the locally remuxed stream.</string>
+</dict>
+</plist>

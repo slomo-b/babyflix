@@ -64,6 +64,8 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "logged_in": app.is_logged_in().await,
         "catalog": counts,
         "ratings_loaded": ratings_loaded,
+        "ffmpeg": app.remux.ffmpeg_path(),
+        "ffprobe": app.remux.ffprobe_path(),
     }))
 }
 
@@ -616,7 +618,12 @@ struct RemuxQ {
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
     let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     if !app.remux.available() {
-        return Err(ApiError("FFmpeg is not available on this system.".into()));
+        return Err(ApiError(
+            "FFmpeg was not found on this system - movies and series cannot be played. Install it \
+             (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg, Linux: apt install ffmpeg) \
+             or set BABYFLIX_FFMPEG to the binary path."
+                .into(),
+        ));
     }
     let ext = q
         .ext

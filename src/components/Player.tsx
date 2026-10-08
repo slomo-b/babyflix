@@ -102,6 +102,11 @@ export function Player() {
   const [remuxAudio, setRemuxAudio] = useState(0);
   const [forceRemux, setForceRemux] = useState(false);
 
+  // last low-level failure message, shown in the error overlay so a broken stream is debuggable
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // bumping this re-runs the load effect (retry button)
+  const [reloadKey, setReloadKey] = useState(0);
+
   const streamKey = current ? `${current.kind}:${current.id}` : "";
 
   const cleanup = useCallback(() => {
@@ -131,6 +136,7 @@ export function Player() {
     const video = videoRef.current;
     if (!current || !video) return;
     setError(false);
+    setErrorMsg(null);
     setLoading(true);
     setPosition(0);
     setDuration(0);
@@ -138,6 +144,7 @@ export function Player() {
     cleanup();
     let cancelled = false;
     let sessionToken: string | null = null;
+    let remuxErr: string | null = null;
 
     const ext = (current.ext || "").toLowerCase();
     const isVod = current.kind !== "live";
@@ -173,11 +180,22 @@ export function Player() {
       hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => setSubtitleIndex(hls.subtitleTrack));
       hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => setAudioIndex(hls.audioTrack));
       hls.on(Hls.Events.LEVEL_SWITCHED, () => setLevelIndex(hls.autoLevelEnabled ? -1 : hls.currentLevel));
+      let networkRetries = 0;
+      let mediaRetries = 0;
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (!data.fatal) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        else onFatal();
+        // Retry a few times (a segment may still be written by FFmpeg), then give up
+        // with a visible error instead of spinning forever.
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 4) {
+          hls.startLoad();
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3) {
+          hls.recoverMediaError();
+          return;
+        }
+        setErrorMsg(String(data.details || data.type || "fatal playback error"));
+        onFatal();
       });
     };
 
@@ -225,8 +243,9 @@ export function Player() {
           if (res.duration && res.duration > 0) setDuration(res.duration);
           setupHls(API_BASE + res.playlist, () => setError(true));
           return;
-        } catch {
-          // FFmpeg unavailable or remux failed -> try direct playback
+        } catch (err) {
+          // FFmpeg unavailable or remux failed -> try direct playback, but keep the reason
+          remuxErr = err instanceof Error ? err.message : String(err);
         }
       }
       const useHls = current.kind === "live" || ext.includes("m3u8") || ext === "";
@@ -274,6 +293,11 @@ export function Player() {
         setForceRemux(true);
         return;
       }
+      const code = video.error?.code;
+      setErrorMsg(
+        remuxErr ??
+          (code === 4 ? t("player.errUnsupported") : t("player.errCode", { code: code ?? "?" }))
+      );
       setLoading(false);
       setError(true);
     };
@@ -294,7 +318,7 @@ export function Player() {
       if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, remuxAudio, forceRemux]);
+  }, [streamKey, remuxAudio, forceRemux, reloadKey]);
 
   const persist = useCallback(
     (pos: number, dur: number) => {
@@ -479,9 +503,24 @@ export function Player() {
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 px-8 text-center">
           <p className="max-w-md text-sm text-white/80">{t("player.streamError")}</p>
-          <button className="btn btn-ghost" onClick={close}>
-            {t("common.close")}
-          </button>
+          {errorMsg && <p className="max-w-md break-words text-xs text-white/50">{errorMsg}</p>}
+          <div className="flex gap-2">
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                setError(false);
+                setErrorMsg(null);
+                setLoading(true);
+                setForceRemux(false);
+                setReloadKey((k) => k + 1);
+              }}
+            >
+              {t("common.retry")}
+            </button>
+            <button className="btn btn-ghost" onClick={close}>
+              {t("common.close")}
+            </button>
+          </div>
         </div>
       )}
 

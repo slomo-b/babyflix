@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "babyflix"
-version = "1.0.8"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -4991,7 +4991,7 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
 dependencies = [

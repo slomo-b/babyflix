@@ -165,6 +165,16 @@ export default function Settings() {
               </span>
             ))}
         </div>
+        {health.data && !health.data.ffmpeg && (
+          <p className="mb-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+            {t("settings.ffmpegMissing")}
+          </p>
+        )}
+        {health.data?.ffmpeg && (
+          <p className="mb-5 truncate text-xs text-[var(--muted)]">
+            {t("settings.ffmpegPath", { path: health.data.ffmpeg })}
+          </p>
+        )}
         <button className="btn btn-ghost" onClick={refresh} disabled={refreshing}>
           <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
           {refreshing ? t("settings.reloading") : t("settings.reload")}

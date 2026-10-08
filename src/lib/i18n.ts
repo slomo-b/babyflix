@@ -208,6 +208,12 @@ const de: Record<string, string> = {
   "player.auto": "Automatisch",
   "player.streamError":
     "Stream konnte nicht geladen werden. Der Sender/Film ist evtl. gerade nicht verfügbar.",
+  "player.errUnsupported":
+    "Dieser Stream kann nicht abgespielt werden (Format oder Codec wird nicht unterstützt).",
+  "player.errCode": "Wiedergabefehler (Code {code}).",
+  "settings.ffmpegMissing":
+    "FFmpeg wurde nicht gefunden – Filme und Serien können nicht wiedergegeben werden. Installation: brew install ffmpeg (macOS), winget install Gyan.FFmpeg (Windows) oder apt install ffmpeg (Linux), danach die App neu starten.",
+  "settings.ffmpegPath": "FFmpeg: {path}",
 
   // rating badge
   "rating.imdb": "IMDb-Bewertung",
@@ -381,6 +387,11 @@ const en: Record<string, string> = {
   "player.quality": "Quality",
   "player.auto": "Auto",
   "player.streamError": "Stream could not be loaded. The channel/movie may be unavailable right now.",
+  "player.errUnsupported": "This stream cannot be played (unsupported format or codec).",
+  "player.errCode": "Playback error (code {code}).",
+  "settings.ffmpegMissing":
+    "FFmpeg was not found – movies and series cannot be played. Install it: brew install ffmpeg (macOS), winget install Gyan.FFmpeg (Windows) or apt install ffmpeg (Linux), then restart the app.",
+  "settings.ffmpegPath": "FFmpeg: {path}",
 
   "rating.imdb": "IMDb rating",
   "rating.panel": "Panel rating",
