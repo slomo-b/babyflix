@@ -39,16 +39,22 @@ Everything is cached aggressively on disk. **No API key is required.**
 Live TV plays directly, but **movies and series are remuxed locally with FFmpeg** so that every
 container/codec (MKV, HEVC, AC3/DTS …) plays in the webview and all audio tracks are selectable.
 
+**You normally do not have to install anything.** If no system FFmpeg is found, BabyFlix
+downloads a static **FFmpeg + FFprobe** for your platform on first start (Windows/Linux/macOS,
+x64 + Apple Silicon), stores it in the app data folder under `bin/` and uses it. A system
+install is still preferred when present.
+
 BabyFlix looks for `ffmpeg`/`ffprobe` in this order:
 
-1. `BABYFLIX_FFMPEG` / `BABYFLIX_FFPROBE` (path to the binary **or** to its directory)
-2. next to the app itself (bundled sidecar)
-3. `PATH`
-4. the usual install directories — on macOS `/opt/homebrew/bin` (Apple Silicon),
+1. a previously auto-downloaded copy (app data `bin/`)
+2. `BABYFLIX_FFMPEG` / `BABYFLIX_FFPROBE` (path to the binary **or** to its directory)
+3. next to the app itself (bundled sidecar)
+4. `PATH`
+5. the usual install directories — on macOS `/opt/homebrew/bin` (Apple Silicon),
    `/usr/local/bin` (Intel), `/opt/local/bin`; on Windows `%LOCALAPPDATA%\Microsoft\WinGet\Links`,
    `C:\ffmpeg\bin`; on Linux `/usr/local/bin`, `/usr/bin`, `/snap/bin`
 
-Install it once:
+If you prefer a system install (or the auto-download failed, e.g. offline):
 
 ```bash
 brew install ffmpeg                      # macOS (Homebrew) — restart the app afterwards
@@ -60,8 +66,12 @@ sudo apt install ffmpeg                  # Linux (Debian/Ubuntu)
 > `/opt/homebrew/bin` is invisible to a plain `PATH` lookup. BabyFlix therefore checks the
 > well-known install directories itself — no need to launch it from the terminal.
 
-If FFmpeg is missing, the app now says so right in the player (and in **Settings →
-Catalog**): movies/series cannot be played, live TV still can.
+The auto-downloaded binaries are **GPL FFmpeg**, fetched straight from the upstream
+`ffmpeg-static` release at runtime (BabyFlix does not redistribute them); the app only invokes
+FFmpeg as a separate process.
+
+While FFmpeg is still being set up, the player (and **Settings → Catalog**) says so; a system
+install / restart is only needed if the automatic download keeps failing.
 
 ---
 

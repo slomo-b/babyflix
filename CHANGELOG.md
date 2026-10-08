@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0] — 2026-10-09
+
+### Added
+- **FFmpeg is provisioned automatically.** If no system FFmpeg is found, BabyFlix downloads a
+  static **FFmpeg + FFprobe** for the current platform (Windows/Linux/macOS, x64 + Apple
+  Silicon) on first start and stores it in the app data folder (`bin/`), then uses it for VOD
+  remux. **macOS users no longer need Homebrew.** A system install (including
+  Homebrew/MacPorts paths) is still preferred, and `BABYFLIX_FFMPEG` / `BABYFLIX_FFPROBE`
+  override everything. The binaries are GPL FFmpeg, fetched directly from the upstream
+  `ffmpeg-static` release at runtime (not redistributed by BabyFlix); the app only invokes it
+  as a separate process. One-time download (~18–28 MB per binary), cached afterwards.
+- When FFmpeg is not ready yet, playing a title now tells the user it is being set up and
+  retries the download in the background instead of failing outright.
+
 ## [1.0.10] — 2026-10-09
 
 ### Fixed

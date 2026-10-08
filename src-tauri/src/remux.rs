@@ -2,14 +2,21 @@
 //! Used for every movie/series so that: containers the webview cannot play (MKV, AVI, …) work,
 //! audio codecs are normalised (e.g. DTS/AC3 -> AAC) and all audio tracks are selectable.
 use anyhow::{anyhow, Result};
+use flate2::read::GzDecoder;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::xtream::UA;
+
+/// Static FFmpeg/FFprobe builds that are provisioned automatically when the system has
+/// none. They are fetched straight from the upstream release at runtime, so BabyFlix
+/// itself does not redistribute FFmpeg (which is GPL).
+const FFMPEG_RELEASE: &str = "b6.1.1";
 
 struct Session {
     child: Child,
@@ -26,8 +33,10 @@ pub struct RemuxStart {
 
 pub struct Remux {
     root: PathBuf,
-    ffmpeg: Option<PathBuf>,
-    ffprobe: Option<PathBuf>,
+    /// Folder for auto-provisioned binaries (`<appdata>/bin`).
+    bin_dir: PathBuf,
+    ffmpeg: RwLock<Option<PathBuf>>,
+    ffprobe: RwLock<Option<PathBuf>>,
     sessions: Mutex<HashMap<String, Session>>,
     keys: Mutex<HashMap<String, String>>,
 }
@@ -175,6 +184,61 @@ fn find_exe(name: &str, env_var: &str) -> Option<PathBuf> {
     None
 }
 
+/// Look for a previously auto-provisioned tool in `bin_dir`.
+fn cached_bin(bin_dir: &Path, name: &str) -> Option<PathBuf> {
+    let p = bin_dir.join(exe_file(name));
+    if p.is_file() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// Upstream asset platform/arch tag for the current system.
+fn asset_tag() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("win32-x64"),
+        ("macos", "aarch64") => Some("darwin-arm64"),
+        ("macos", "x86_64") => Some("darwin-x64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        ("linux", "aarch64") => Some("linux-arm64"),
+        _ => None,
+    }
+}
+
+/// Download a gzip-compressed static binary and install it (executable) at `dest`.
+async fn download_gunzip(client: &reqwest::Client, url: &str, dest: &Path) -> Result<()> {
+    let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await?;
+    // Decompress + write off the async runtime (large buffers, blocking I/O).
+    let dest = dest.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let mut decoder = GzDecoder::new(&bytes[..]);
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out)?;
+        if out.len() < 1_000_000 {
+            return Err(anyhow!("downloaded file looks truncated ({} bytes)", out.len()));
+        }
+        let tmp = dest.with_extension("part");
+        std::fs::write(&tmp, &out)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+        }
+        if dest.exists() {
+            let _ = std::fs::remove_file(&dest);
+        }
+        std::fs::rename(&tmp, &dest)?;
+        Ok(())
+    })
+    .await??;
+    Ok(())
+}
+
 fn now_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -227,22 +291,25 @@ fn stream_codec(list: &Value, idx: usize) -> Option<String> {
 impl Remux {
     pub fn new(root: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(&root);
-        let ffmpeg = find_exe("ffmpeg", "BABYFLIX_FFMPEG");
-        let ffprobe = find_exe("ffprobe", "BABYFLIX_FFPROBE");
+        let bin_dir = root
+            .parent()
+            .map(|p| p.join("bin"))
+            .unwrap_or_else(|| root.join("bin"));
+        let _ = std::fs::create_dir_all(&bin_dir);
+        // Prefer a previously auto-provisioned binary, then any system install.
+        let ffmpeg = cached_bin(&bin_dir, "ffmpeg").or_else(|| find_exe("ffmpeg", "BABYFLIX_FFMPEG"));
+        let ffprobe = cached_bin(&bin_dir, "ffprobe").or_else(|| find_exe("ffprobe", "BABYFLIX_FFPROBE"));
         match (&ffmpeg, &ffprobe) {
             (Some(f), Some(p)) => {
                 eprintln!("[babyflix] ffmpeg: {} | ffprobe: {}", f.display(), p.display())
             }
-            _ => eprintln!(
-                "[babyflix] FFmpeg not found - movies/series cannot be remuxed. Install it \
-                 (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg, \
-                 Linux: apt install ffmpeg) or point BABYFLIX_FFMPEG at the binary."
-            ),
+            _ => eprintln!("[babyflix] FFmpeg not found yet - will be provisioned automatically"),
         }
         Remux {
             root,
-            ffmpeg,
-            ffprobe,
+            bin_dir,
+            ffmpeg: RwLock::new(ffmpeg),
+            ffprobe: RwLock::new(ffprobe),
             sessions: Mutex::new(HashMap::new()),
             keys: Mutex::new(HashMap::new()),
         }
@@ -250,20 +317,61 @@ impl Remux {
 
     /// Path of the FFmpeg binary in use (surfaced by `/api/health` for diagnostics).
     pub fn ffmpeg_path(&self) -> Option<String> {
-        self.ffmpeg.as_ref().map(|p| p.display().to_string())
+        self.ffmpeg.read().unwrap().as_ref().map(|p| p.display().to_string())
     }
 
     /// Path of the FFprobe binary in use (surfaced by `/api/health` for diagnostics).
     pub fn ffprobe_path(&self) -> Option<String> {
-        self.ffprobe.as_ref().map(|p| p.display().to_string())
+        self.ffprobe.read().unwrap().as_ref().map(|p| p.display().to_string())
     }
 
     pub fn available(&self) -> bool {
-        self.ffmpeg.is_some()
+        self.ffmpeg.read().unwrap().is_some()
+    }
+
+    fn ffmpeg_bin(&self) -> Option<PathBuf> {
+        self.ffmpeg.read().unwrap().clone()
+    }
+
+    /// Download and install FFmpeg/FFprobe into `bin_dir` if none is available (system
+    /// install or a previous download). Returns immediately when nothing needs doing.
+    pub async fn ensure_binaries(&self, client: &reqwest::Client) {
+        let Some(tag) = asset_tag() else {
+            eprintln!(
+                "[babyflix] no prebuilt FFmpeg for {}/{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
+            return;
+        };
+        for (tool, slot) in [("ffmpeg", &self.ffmpeg), ("ffprobe", &self.ffprobe)] {
+            if slot.read().unwrap().is_some() {
+                continue;
+            }
+            if let Some(p) = cached_bin(&self.bin_dir, tool) {
+                *slot.write().unwrap() = Some(p);
+                continue;
+            }
+            let url = format!(
+                "https://github.com/eugeneware/ffmpeg-static/releases/download/{FFMPEG_RELEASE}/{tool}-{tag}.gz"
+            );
+            let dest = self.bin_dir.join(exe_file(tool));
+            match download_gunzip(client, &url, &dest).await {
+                Ok(()) => {
+                    eprintln!("[babyflix] provisioned {tool}: {}", dest.display());
+                    *slot.write().unwrap() = Some(dest);
+                }
+                Err(e) => {
+                    // Most likely offline; skip the second tool as well.
+                    eprintln!("[babyflix] could not provision {tool}: {e}");
+                    return;
+                }
+            }
+        }
     }
 
     fn probe_json(&self, url: &str) -> Option<Value> {
-        let ffprobe = self.ffprobe.as_ref()?;
+        let ffprobe = self.ffprobe.read().unwrap().clone()?;
         let mut cmd = Command::new(ffprobe);
         cmd.arg("-v")
             .arg("error")
@@ -291,7 +399,7 @@ impl Remux {
 
     /// Start (or reuse) a remux session; returns the token, duration and stream info.
     pub fn start(&self, key: &str, url: &str, audio: Option<usize>) -> Result<RemuxStart> {
-        let ffmpeg = self.ffmpeg.clone().ok_or_else(|| anyhow!("ffmpeg not found"))?;
+        let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
         // Reuse an existing session for the exact key.
         {

@@ -42,6 +42,12 @@ pub fn run() {
                 }
             });
 
+            // Provision FFmpeg/FFprobe (VOD remux) when the system has none.
+            let provision = state.clone();
+            tauri::async_runtime::spawn(async move {
+                provision.remux.ensure_binaries(&provision.client).await;
+            });
+
             // Restore session + pre-load keyless IMDb ratings in the background.
             let boot_state = state.clone();
             tauri::async_runtime::spawn(async move {

@@ -618,10 +618,16 @@ struct RemuxQ {
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
     let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     if !app.remux.available() {
+        // First run may still be downloading FFmpeg; if the initial attempt failed
+        // (e.g. offline at startup), retry it in the background.
+        let app2 = app.clone();
+        tokio::spawn(async move {
+            app2.remux.ensure_binaries(&app2.client).await;
+        });
         return Err(ApiError(
-            "FFmpeg was not found on this system - movies and series cannot be played. Install it \
-             (macOS: brew install ffmpeg, Windows: winget install Gyan.FFmpeg, Linux: apt install ffmpeg) \
-             or set BABYFLIX_FFMPEG to the binary path."
+            "FFmpeg is being set up automatically - please try again in a moment. \
+             If it keeps failing, install it (macOS: brew install ffmpeg, Windows: \
+             winget install Gyan.FFmpeg, Linux: apt install ffmpeg) or set BABYFLIX_FFMPEG."
                 .into(),
         ));
     }
