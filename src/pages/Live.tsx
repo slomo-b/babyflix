@@ -7,6 +7,7 @@ import { fmtTime, initials, initialsColor } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { GridSkeleton } from "../components/Skeletons";
 import { Select } from "../components/Select";
+import { useScrollMemory } from "../lib/useScrollMemory";
 
 export default function Live() {
   const t = useT();
@@ -14,6 +15,7 @@ export default function Live() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const play = useStore((s) => s.play);
+  useScrollMemory("live");
 
   const cats = useQuery({
     queryKey: ["cats", "live"],

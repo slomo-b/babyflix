@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Film, Heart, Info, Play, Star } from "lucide-react";
+import { ArrowLeft, Film, Heart, Info, Play, Star, X } from "lucide-react";
 import { api, imgUrl, Episode } from "../lib/api";
 import { useStore } from "../lib/store";
-import { fmtDuration, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
+import { fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { Select } from "../components/Select";
 
@@ -16,9 +16,12 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   const favorites = useStore((s) => s.favorites);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const [seasonIdx, setSeasonIdx] = useState(0);
+  const [resumeBanner, setResumeBanner] = useState(false);
 
   const favKey = `${kind}:${id}`;
   const isFav = favorites.some((f) => f.key === favKey);
+  const history = useStore((s) => s.history);
+  const autoResume = useStore((s) => s.autoResume);
 
   const query = useQuery({
     queryKey: ["detail", kind, id],
@@ -45,7 +48,29 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
 
   useEffect(() => {
     setSeasonIdx(0);
-  }, [id]);
+    setResumeBanner(false);
+    // Nur Filme: ein begonnener Film bekommt beim Öffnen ein „Weiterschauen?"-Band.
+    if (kind !== "movie") return;
+    const h = history.find((x) => x.key === `movie:${id}`);
+    if (!h || h.duration <= 0) return;
+    if (h.position <= 60 || h.position >= h.duration - 60) return;
+    setResumeBanner(true);
+    if (!autoResume) return;
+    const timer = setTimeout(() => {
+      setResumeBanner(false);
+      play({
+        kind: "movie",
+        id: h.id,
+        ext: h.ext,
+        title: h.title,
+        poster: h.poster,
+        subtitle: h.subtitle,
+        historyKey: h.key,
+        startAt: h.position,
+      });
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [id, kind, history, autoResume, play]);
 
   const rating = imdb?.rating ?? detail?.rating ?? item?.rating ?? null;
   const votes = imdb?.votes ?? null;
@@ -68,6 +93,14 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
       historyKey: `movie:${item.id}`,
     });
   };
+
+  /** Fortschritt eines begonnenen Films in Prozent (0 = nicht begonnen). */
+  const historyResume = kind === "movie" ? history.find((x) => x.key === `movie:${id}`) : undefined;
+  const movieProgress = (() => {
+    if (!historyResume || historyResume.duration <= 0) return 0;
+    const p = (historyResume.position / historyResume.duration) * 100;
+    return p > 1 && p < 98 ? p : 0;
+  })();
 
   const playEpisode = (ep: Episode & { season: number }) => {
     if (!item) return;
@@ -176,9 +209,55 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
           </div>
 
           <div className="mt-5 flex flex-col gap-2.5">
+            {resumeBanner && kind === "movie" && (
+              <div className="flex items-center gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 p-3">
+                <Info size={16} className="shrink-0 text-[var(--accent-2)]" />
+                <span className="min-w-0 flex-1 text-xs leading-snug text-white/90">
+                  {t("detail.resumeAsk", { time: fmtTimeClock(historyResume?.position ?? 0) })}
+                </span>
+                <button
+                  className="btn btn-primary shrink-0 px-3 py-1.5 text-xs"
+                  onClick={() => {
+                    setResumeBanner(false);
+                    const h = historyResume;
+                    if (!h || !item) return;
+                    play({
+                      kind: "movie",
+                      id: h.id,
+                      ext: h.ext,
+                      title: h.title,
+                      poster: h.poster,
+                      subtitle: h.subtitle,
+                      historyKey: h.key,
+                      startAt: h.position,
+                    });
+                  }}
+                >
+                  <Play size={14} fill="currentColor" /> {t("detail.resume")}
+                </button>
+                <button
+                  className="shrink-0 rounded-full px-2 py-1 text-xs text-[var(--muted)] transition hover:text-white"
+                  onClick={() => setResumeBanner(false)}
+                  title={t("common.remove")}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
             {kind === "movie" ? (
-              <button className="btn btn-primary py-3.5 text-base" onClick={playMovie}>
-                <Play size={20} fill="currentColor" /> {t("common.play")}
+              <button
+                className="btn btn-primary relative overflow-hidden py-3.5 text-base"
+                onClick={playMovie}
+              >
+                {movieProgress > 0 && (
+                  <span
+                    className="absolute inset-y-0 left-0 bg-white/25"
+                    style={{ width: `${movieProgress}%` }}
+                  />
+                )}
+                <span className="relative flex items-center gap-2">
+                  <Play size={20} fill="currentColor" /> {t("common.play")}
+                </span>
               </button>
             ) : (
               <button

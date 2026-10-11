@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { Row } from "../components/Row";
 import { RowSkeleton } from "../components/Skeletons";
 import { useOpen } from "../lib/useOpen";
+import { useScrollMemory } from "../lib/useScrollMemory";
 import { useT } from "../lib/i18n";
 
 export default function Search() {
@@ -14,6 +15,7 @@ export default function Search() {
   const [q, setQ] = useState(params.get("q") ?? "");
   const [term, setTerm] = useState(params.get("q") ?? "");
   const { open, playItem } = useOpen();
+  useScrollMemory("search");
 
   useEffect(() => {
     const timer = setTimeout(() => setTerm(q.trim()), 300);

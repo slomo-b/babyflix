@@ -8,6 +8,7 @@ import { MediaCard } from "../components/MediaCard";
 import { GridSkeleton } from "../components/Skeletons";
 import { Select } from "../components/Select";
 import { useOpen } from "../lib/useOpen";
+import { useScrollMemory, resetScrollMemory } from "../lib/useScrollMemory";
 
 export function CatalogPage({
   kind,
@@ -26,6 +27,10 @@ export function CatalogPage({
   const [catQuery, setCatQuery] = useState("");
   const { open } = useOpen();
   const sentinel = useRef<HTMLDivElement>(null);
+
+  // Scrollposition je Kategorie merken (Rückweg aus der Detailansicht).
+  const scrollKey = `${kind}:${category || "alle"}`;
+  useScrollMemory(scrollKey);
 
   useEffect(() => {
     setCategory(params.get("category") ?? "");
@@ -82,6 +87,7 @@ export function CatalogPage({
   }, [query.hasNextPage, query.isFetchingNextPage, query]);
 
   const pickCategory = (id: string) => {
+    resetScrollMemory(scrollKey);
     setCategory(id);
     if (id) setParams({ category: id });
     else setParams({});

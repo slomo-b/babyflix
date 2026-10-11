@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   Settings2,
+  SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
@@ -16,7 +17,7 @@ import {
 import { API_BASE, playerUrl } from "../lib/api";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
-import { fmtTime } from "../lib/format";
+import { fmtTime, fmtTimeClock } from "../lib/format";
 import { useLang, useT } from "../lib/i18n";
 
 interface TrackInfo {
@@ -275,7 +276,10 @@ export function Player() {
         }
         if (subs.length) setSubtitleTracks(subs);
       }
-      if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
+      const startAt = current.startAt;
+      if (startAt && startAt > 10 && current.kind !== "live" && video.duration > 0) {
+        video.currentTime = Math.min(startAt, Math.max(0, video.duration - 5));
+      } else if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
         video.currentTime = resume.position;
       }
     };
@@ -357,6 +361,13 @@ export function Player() {
     const v = videoRef.current;
     if (!v || !Number.isFinite(v.duration)) return;
     v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + delta));
+  }, []);
+
+  /** Sprungmarken: Anfang und zwei Drittel – typische Intro-/Abspannlängen. */
+  const seekTo = useCallback((frac: number) => {
+    const v = videoRef.current;
+    if (!v || !Number.isFinite(v.duration) || v.duration <= 0) return;
+    v.currentTime = Math.max(0, Math.min(v.duration - 1, v.duration * frac));
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -643,6 +654,25 @@ export function Player() {
                   background: `linear-gradient(to right, var(--accent-2) ${pct}%, rgba(255,255,255,0.2) ${pct}%)`,
                 }}
               />
+              {/* Sprungmarken im Balken: Anfang + zwei Drittel */}
+              {[0, 66.6].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => seekTo(f / 100)}
+                  title={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
+                  aria-label={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
+                  className={`absolute top-1/2 -translate-y-1/2 ${
+                    f === 0 ? "-translate-x-1/2" : "translate-x-0"
+                  }`}
+                  style={{ left: `${f}%` }}
+                >
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-black/45 text-white/90 transition hover:scale-110 hover:border-white hover:bg-black/80">
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+                      <path d="M0 0h6L3 4l3 4H0z" />
+                    </svg>
+                  </span>
+                </button>
+              ))}
             </div>
             <span className="w-14 text-xs tabular-nums text-white/70">{fmtTimeClock(duration)}</span>
           </div>
@@ -653,13 +683,22 @@ export function Player() {
             {playing ? <Pause size={26} /> : <Play size={26} fill="currentColor" />}
           </button>
           {!isLive && (
-            <button
-              onClick={() => seek(10)}
-              className="text-white/80 transition hover:text-white"
-              title="+10s"
-            >
-              <SkipForward size={22} />
-            </button>
+            <>
+              <button
+                onClick={() => seek(-10)}
+                className="text-white/80 transition hover:text-white"
+                title="-10s"
+              >
+                <SkipBack size={22} />
+              </button>
+              <button
+                onClick={() => seek(10)}
+                className="text-white/80 transition hover:text-white"
+                title="+10s"
+              >
+                <SkipForward size={22} />
+              </button>
+            </>
           )}
 
           <div className="group flex items-center gap-2">
@@ -736,11 +775,3 @@ function TrackRow({
   );
 }
 
-function fmtTimeClock(secs: number): string {
-  if (!Number.isFinite(secs) || secs <= 0) return "00:00";
-  const s = Math.floor(secs % 60);
-  const m = Math.floor((secs / 60) % 60);
-  const h = Math.floor(secs / 3600);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
-}

@@ -10,15 +10,17 @@ export interface PlayNext {
 }
 
 export interface PlayRequest {
-  kind: "movie" | "series" | "live";
-  id: string;
-  ext?: string;
-  title: string;
-  poster?: string;
-  subtitle?: string;
-  historyKey: string;
-  next?: PlayNext;
-}
+ kind: "movie" | "series" | "live";
+ id: string;
+ ext?: string;
+ title: string;
+ poster?: string;
+ subtitle?: string;
+ historyKey: string;
+ next?: PlayNext;
+ /** Fortsetzen-Angebot: erst ab dieser Sekunde statt bei 0 starten. */
+ startAt?: number;
+ }
 
 export interface HistoryItem {
   key: string;
@@ -63,6 +65,9 @@ interface AppStore {
   removeHistory: (key: string) => void;
   clearHistory: () => void;
 
+  autoResume: boolean;
+  setAutoResume: (v: boolean) => void;
+
   autoplayNext: boolean;
   setAutoplayNext: (v: boolean) => void;
 
@@ -96,6 +101,9 @@ export const useStore = create<AppStore>()(
       removeHistory: (key) => set((s) => ({ history: s.history.filter((x) => x.key !== key) })),
       clearHistory: () => set({ history: [] }),
 
+      autoResume: true,
+      setAutoResume: (v) => set({ autoResume: v }),
+
       autoplayNext: true,
       setAutoplayNext: (v) => set({ autoplayNext: v }),
 
@@ -116,6 +124,7 @@ export const useStore = create<AppStore>()(
         history: s.history,
         favorites: s.favorites,
         autoplayNext: s.autoplayNext,
+        autoResume: s.autoResume,
         savedLogin: s.savedLogin,
       }),
     }

@@ -3,6 +3,7 @@ import { imgUrl, MediaItem } from "../lib/api";
 import { RatingBadge } from "./RatingBadge";
 import { initials, initialsColor } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { useStore } from "../lib/store";
 
 function Placeholder({ name }: { name: string }) {
   return (
@@ -30,6 +31,12 @@ export function MediaCard({
 }) {
   const cover = imgUrl(item.cover);
   const rating = ratingOverride ?? item.rating;
+  // Fortschritt zeigen, wenn der Titel schon angefangen wurde (Home-Karten).
+  const entry = useStore((s) => s.history.find((h) => h.key === `${item.kind}:${item.id}`));
+  const seenPct =
+    entry && entry.duration > 0
+      ? Math.min(100, Math.max(0, (entry.position / entry.duration) * 100))
+      : 0;
   return (
     <div
       className="group card shrink-0"
@@ -70,6 +77,20 @@ export function MediaCard({
             {item.name}
           </div>
         </div>
+
+        {seenPct > 1 && seenPct < 99 && (
+          <>
+            <div className="absolute inset-x-0 bottom-0 h-1.5 bg-black/55">
+              <div
+                className="h-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-2)]"
+                style={{ width: `${seenPct}%` }}
+              />
+            </div>
+            <div className="absolute right-2 bottom-2.5 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white/90 backdrop-blur">
+              {Math.round(seenPct)}%
+            </div>
+          </>
+        )}
 
         <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">

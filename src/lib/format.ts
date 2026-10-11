@@ -79,3 +79,13 @@ export function initialsColor(name: string): string {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return `hsl(${h} 55% 32%)`;
 }
+
+/** Uhrzeit-Format für den Player: mm:ss bzw. h:mm:ss. */
+export function fmtTimeClock(secs: number): string {
+  if (!Number.isFinite(secs) || secs <= 0) return "00:00";
+  const s = Math.floor(secs % 60);
+  const m = Math.floor((secs / 60) % 60);
+  const h = Math.floor(secs / 3600);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}

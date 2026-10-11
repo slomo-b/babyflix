@@ -53,6 +53,8 @@ export default function Settings() {
 
   const autoplayNext = useStore((s) => s.autoplayNext);
   const setAutoplayNext = useStore((s) => s.setAutoplayNext);
+  const autoResume = useStore((s) => s.autoResume);
+  const setAutoResume = useStore((s) => s.setAutoResume);
   const clearHistory = useStore((s) => s.clearHistory);
   const historyCount = useStore((s) => s.history.length);
   const setSavedLogin = useStore((s) => s.setSavedLogin);
@@ -321,6 +323,19 @@ export default function Settings() {
             type="checkbox"
             checked={autoplayNext}
             onChange={(e) => setAutoplayNext(e.target.checked)}
+            className="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/20 transition-all checked:bg-[var(--accent)] relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-all checked:before:left-[18px]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between gap-4 py-3">
+          <span className="text-sm">
+            {t("settings.autoResume")}
+            <span className="block text-xs text-[var(--muted)]">{t("settings.autoResumeHint")}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={autoResume}
+            onChange={(e) => setAutoResume(e.target.checked)}
             className="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/20 transition-all checked:bg-[var(--accent)] relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-all checked:before:left-[18px]"
           />
         </label>
