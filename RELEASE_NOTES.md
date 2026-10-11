@@ -4,17 +4,18 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.2.0
+## 🆕 What's new in 1.3.0
 
-- ⏭️ **Automatic next episode.** When an episode ends, the next one starts by itself — also
-  across a season boundary. In the last 20 seconds a small **Up next** banner shows what is
-  coming, with *Play now* and *Skip*.
-- 💡 **Last watched episode is highlighted.** In a series, the season and series view mark the
-  episode you watched last (accented card, *Last watched* badge, progress bar per episode), and
-  the series opens on that season. The main button becomes **Resume: S1 · E2** and continues
-  exactly there.
-- 🛠️ **More reliable episode endings.** Streams that never report a proper "ended" event now
-  still advance, and a chained episode always starts playing on its own.
+- 🎬 **End-of-episode card.** When an episode finishes, a card shows what is next with a
+  **10-second countdown** that starts the following episode automatically — or use *Play now*,
+  *Stop automatic* and *Close*. At the end of a series it offers **Replay** instead.
+- 🎚️ **Completely rebuilt seek bar.** Drag the timeline to any position (target time is previewed
+  while scrubbing), hover for a time tooltip, see the buffered part behind the progress and use the
+  quick-jump markers; double-click the video halves to jump −10 s / +10 s.
+- ⏩ **Playback speed** from 0.5× to 2× and a **keyboard overview** (press `?`) — plus extra
+  shortcuts, including `0`–`9` to jump straight into the episode.
+- 🛠️ **Robust playback.** Seeks are clamped to the range the stream really allows and the progress
+  bar keeps working even when a stream reports no duration.
 
 ## ✨ Highlights
 

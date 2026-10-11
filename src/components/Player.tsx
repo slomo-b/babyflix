@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 import {
   ChevronLeft,
+  Keyboard,
   Loader2,
   Maximize,
   Minimize,
   Pause,
   Play,
+  RotateCcw,
   Settings2,
   SkipBack,
   SkipForward,
@@ -58,6 +60,41 @@ function isGermanTrack(lang?: string | null, title?: string | null): boolean {
   const t = (title || "").toLowerCase();
   return t.includes("deutsch") || t.includes("german");
 }
+
+/** Countdown am Folgenende, bevor automatisch die nächste Folge startet. */
+const END_COUNTDOWN = 10;
+
+/** Zeitleiste: klemmt ein Sprungziel in den tatsächlich spulbaren Bereich. */
+function clampToSeekable(v: HTMLVideoElement, t: number, dur: number): number {
+  let target = Math.min(Math.max(0, t), Math.max(0, dur - 0.5));
+  try {
+    const r = v.seekable;
+    if (r && r.length > 0) {
+      const last = r.length - 1;
+      for (let i = 0; i < r.length; i++) {
+        if (target >= r.start(i) && target <= r.end(i)) return target;
+      }
+      if (target < r.start(0)) target = r.start(0);
+      else target = Math.max(r.start(last), Math.min(target, r.end(last)));
+    }
+  } catch {
+    /* seekable wirft, solange nichts geladen ist */
+  }
+  return target;
+}
+
+/** Tastenkürzel-Übersicht: Taste → i18n-Schlüssel. */
+const SHORTCUTS: [string, string][] = [
+  ["Space", "player.kPlay"],
+  ["← / →", "player.k10"],
+  ["⇧ + ← / →", "player.k30"],
+  ["↑ / ↓", "player.kVol"],
+  ["M", "player.kMute"],
+  ["F", "player.kFull"],
+  ["0–9", "player.kTenth"],
+  ["Home / End", "player.kStartEnd"],
+  ["Esc", "player.kEsc"],
+];
 
 // Containers the webview can play directly (not used for VOD: we always remux there).
 
@@ -112,6 +149,25 @@ export function Player() {
   const [autoOff, setAutoOff] = useState(false);
   const autoOffRef = useRef(false);
 
+  // Endkarte („Nächste Folge") am Episodenende + Automatik-Countdown.
+  const [endMode, setEndMode] = useState<null | "next" | "done">(null);
+  const [endIn, setEndIn] = useState(0);
+  const endTickRef = useRef<number | null>(null);
+  const endInRef = useRef(0);
+  const endShownRef = useRef(false);
+  const showEndRef = useRef<() => void>(() => {});
+
+  // Zeitleiste: eigener Zeiger statt <input type="range">.
+  const [hoverPct, setHoverPct] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const [bufferedPct, setBufferedPct] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(1);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef<number | null>(null);
+
   const streamKey = current ? `${current.kind}:${current.id}` : "";
 
   const cleanup = useCallback(() => {
@@ -136,7 +192,27 @@ export function Player() {
     autoAudioRef.current = false;
     autoOffRef.current = false;
     setAutoOff(false);
+    setEndMode(null);
+    setEndIn(0);
+    endInRef.current = 0;
+    endShownRef.current = false;
+    setHoverPct(null);
+    setDragging(false);
+    draggingRef.current = false;
+    setBufferedPct(0);
+    setFlash(null);
+    if (endTickRef.current !== null) {
+      window.clearInterval(endTickRef.current);
+      endTickRef.current = null;
+    }
   }, [streamKey]);
+
+  // Tempo auf das Video übertragen – auch nach einem Streamwechsel.
+  useEffect(() => {
+    speedRef.current = speed;
+    const v = videoRef.current;
+    if (v) v.playbackRate = speed;
+  }, [speed, streamKey]);
 
   // Echte Episodenlänge (vom Backend geprobt) für den Enden-Wächter bereithalten:
   // Bei HLS-„event"-Streams meldet das Video-Element bis zum Schluss „Infinity".
@@ -260,6 +336,9 @@ export function Player() {
         } catch (err) {
           // FFmpeg unavailable or remux failed -> try direct playback, but keep the reason
           remuxErr = err instanceof Error ? err.message : String(err);
+          // Wichtig: der Direktpfad muss die Länge aus dem Videoelement übernehmen,
+          // sonst bleibt die Zeitleiste ohne Gesamtlänge (Füllung/Griff/Vorschau tot).
+          remuxRef.current = false;
         }
       }
       const useHls = current.kind === "live" || ext.includes("m3u8") || ext === "";
@@ -277,31 +356,20 @@ export function Player() {
 
     const resume = history.find((h) => h.key === current.historyKey);
 
-    // Nächste Folge starten – genutzt von „ended" und vom Wächter unten.
-    const goNext = () => {
-      const nx = current.next;
-      if (!nx) return;
-      play({
-        kind: nx.kind,
-        id: nx.id,
-        ext: nx.ext,
-        title: nx.title,
-        subtitle: nx.subtitle,
-        poster: current.poster,
-        historyKey: `${nx.kind}:${nx.id}`,
-      });
-    };
     let endTimer: number | null = null;
+    // Am Ende wird nicht mehr still weitergeschaltet: es kommt die Endkarte,
+    // die den Wechsel anbietet (und je nach Einstellung automatisch startet).
     const onEnded = () => {
       setPlaying(false);
-      if (autoOffRef.current) return;
-      if (autoplayNext && current.next) goNext();
+      if (endShownRef.current) return;
+      showEndRef.current();
     };
 
     const onLoaded = () => {
       if (!remuxRef.current) {
         setDuration(Number.isFinite(video.duration) ? video.duration : 0);
       }
+      video.playbackRate = speedRef.current;
       setLoading(false);
       if (!hlsRef.current) {
         const subs: TrackInfo[] = [];
@@ -326,20 +394,37 @@ export function Player() {
       setPosition(video.currentTime);
       const elDur = Number.isFinite(video.duration) ? video.duration : 0;
       const dur = elDur > 0 ? elDur : durRef.current;
+      // Solange die Backend-Länge fehlt, die des Videoelements übernehmen.
+      if (elDur > 0) setDuration((d) => (d > 0 ? d : elDur));
       const now = Date.now();
       if (now - lastSave.current > 4000) {
         lastSave.current = now;
         persist(video.currentTime, dur);
       }
+      // Gepufferter Bereich (heller Balken hinter dem Fortschritt).
+      try {
+        const b = video.buffered;
+        let end = 0;
+        for (let i = 0; i < b.length; i++) {
+          if (video.currentTime >= b.start(i) - 0.5 && video.currentTime <= b.end(i) + 5) {
+            end = b.end(i);
+            break;
+          }
+        }
+        if (!end && b.length) end = b.end(b.length - 1);
+        setBufferedPct(dur > 0 ? Math.min(100, (end / dur) * 100) : 0);
+      } catch {
+        /* buffered wirft, solange nichts geladen ist */
+      }
       // Wächter: FFmpeg-Remux-Streams (HLS „event") melden am Ende nicht immer
-      // ein „ended". Stockt die Wiedergabe am Ende, wird trotzdem weitergeschaltet.
-      if (autoplayNext && current.next && !autoOffRef.current && current.kind !== "live") {
+      // ein „ended". Stockt die Wiedergabe am Ende, kommt die Endkarte trotzdem.
+      if (current.kind !== "live" && !endShownRef.current) {
         if (dur > 0 && !video.paused && video.currentTime >= dur - 1.5) {
           if (endTimer === null) {
             endTimer = window.setTimeout(() => {
               endTimer = null;
               if (!cancelled) onEnded();
-            }, 2500);
+            }, 2000);
           }
         } else if (endTimer !== null) {
           window.clearTimeout(endTimer);
@@ -431,18 +516,176 @@ export function Player() {
     else v.pause();
   }, []);
 
-  const seek = useCallback((delta: number) => {
+  /** Verlässliche Gesamtlänge: Element-Dauer, sonst die vom Backend geprobte. */
+  const totalDuration = useCallback(() => {
     const v = videoRef.current;
-    if (!v || !Number.isFinite(v.duration)) return;
-    v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + delta));
+    const elDur = v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+    return elDur > 0 ? elDur : durRef.current;
   }, []);
 
-  /** Sprungmarken: Anfang und zwei Drittel – typische Intro-/Abspannlängen. */
-  const seekTo = useCallback((frac: number) => {
-    const v = videoRef.current;
-    if (!v || !Number.isFinite(v.duration) || v.duration <= 0) return;
-    v.currentTime = Math.max(0, Math.min(v.duration - 1, v.duration * frac));
+  /** Endkarte schließen und den Automatik-Countdown stoppen. */
+  const cancelEnd = useCallback(() => {
+    if (endTickRef.current !== null) {
+      window.clearInterval(endTickRef.current);
+      endTickRef.current = null;
+    }
+    endInRef.current = 0;
+    setEndIn(0);
+    setEndMode(null);
   }, []);
+
+  /** Countdown am Ende: zählt runter und startet dann die nächste Folge. */
+  const startCountdown = useCallback(() => {
+    if (endTickRef.current !== null) window.clearInterval(endTickRef.current);
+    endInRef.current = END_COUNTDOWN;
+    setEndIn(END_COUNTDOWN);
+    endTickRef.current = window.setInterval(() => {
+      endInRef.current -= 1;
+      setEndIn(endInRef.current);
+      if (endInRef.current <= 0) {
+        if (endTickRef.current !== null) {
+          window.clearInterval(endTickRef.current);
+          endTickRef.current = null;
+        }
+        goNextNow();
+      }
+    }, 1000);
+  }, [goNextNow]);
+
+  /** „Automatik stoppen": für diese Folge nicht mehr automatisch weiterschalten. */
+  const stopAuto = useCallback(() => {
+    if (endTickRef.current !== null) {
+      window.clearInterval(endTickRef.current);
+      endTickRef.current = null;
+    }
+    endInRef.current = 0;
+    setEndIn(0);
+    autoOffRef.current = true;
+    setAutoOff(true);
+  }, []);
+
+  /** Am Folgenende: Endkarte öffnen (mit Countdown, wenn die Automatik aktiv ist). */
+  const openEndCard = useCallback(() => {
+    if (!current || current.kind === "live" || endShownRef.current) return;
+    if (!current.next && current.kind !== "series") return;
+    endShownRef.current = true;
+    setEndMode(current.next ? "next" : "done");
+    if (current.next && autoplayNext && !autoOffRef.current) {
+      startCountdown();
+    } else {
+      endInRef.current = 0;
+      setEndIn(0);
+    }
+  }, [current, autoplayNext, startCountdown]);
+
+  // Die Listener im Ladepfad leben länger als ein Render – sie rufen die
+  // jeweils aktuelle Fassung über die Ref auf.
+  useEffect(() => {
+    showEndRef.current = openEndCard;
+  }, [openEndCard]);
+
+  // Beim Verlassen des Players laufen keine Timer weiter.
+  useEffect(
+    () => () => {
+      if (endTickRef.current !== null) window.clearInterval(endTickRef.current);
+      if (flashTimer.current) window.clearTimeout(flashTimer.current);
+      if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    },
+    []
+  );
+
+  /** „Erneut abspielen" (Ende der Serie). */
+  const restart = useCallback(() => {
+    cancelEnd();
+    endShownRef.current = false;
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    v.play().catch(() => {});
+  }, [cancelEnd]);
+
+  /** Sprung an eine absolute Zeit (Zeitleiste, Kürzel, Sprungmarken). */
+  const seekToTime = useCallback(
+    (t: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const dur = totalDuration();
+      if (!(dur > 0)) return;
+      const target = clampToSeekable(v, t, dur);
+      try {
+        v.currentTime = target;
+      } catch {
+        /* ignore */
+      }
+      setPosition(target);
+      setHoverPct(null);
+      // Zurückspulen heißt: wieder mitten in der Folge.
+      endShownRef.current = false;
+      cancelEnd();
+    },
+    [cancelEnd, totalDuration]
+  );
+
+  /** Kurzer Einblender („+10 s") beim Springen. */
+  const showFlash = useCallback((text: string) => {
+    setFlash(text);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 700);
+  }, []);
+
+  const seek = useCallback(
+    (delta: number, withFlash = true) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const dur = totalDuration();
+      if (!(dur > 0)) return;
+      if (withFlash) showFlash(`${delta > 0 ? "+" : "−"}${Math.abs(delta)} s`);
+      seekToTime(v.currentTime + delta);
+    },
+    [showFlash, seekToTime, totalDuration]
+  );
+
+  /** Sprungmarken: Anfang und zwei Drittel – typische Intro-/Abspannlängen. */
+  const seekTo = useCallback(
+    (frac: number) => {
+      const dur = totalDuration();
+      if (!(dur > 0)) return;
+      seekToTime(Math.min(dur - 1, dur * frac));
+    },
+    [seekToTime, totalDuration]
+  );
+
+  // Zeitleiste: Zeigerposition → Anteil. Beim Ziehen wird nur die Vorschau
+  // bewegt, gesprungen wird beim Loslassen (der Remux-Stream dankt es).
+  const barPctFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget.getBoundingClientRect();
+    if (!el.width) return 0;
+    return Math.min(1, Math.max(0, (e.clientX - el.left) / el.width));
+  };
+  const onBarDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (current?.kind === "live") return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draggingRef.current = true;
+    setDragging(true);
+    setHoverPct(barPctFromEvent(e));
+  };
+  const onBarMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    setHoverPct(barPctFromEvent(e));
+  };
+  const onBarUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const wasDragging = draggingRef.current;
+    const f = barPctFromEvent(e);
+    draggingRef.current = false;
+    setDragging(false);
+    setHoverPct(null);
+    if (!wasDragging) return;
+    const dur = totalDuration();
+    if (dur > 0) seekToTime(f * dur);
+  };
 
   const toggleFullscreen = useCallback(() => {
     const el = wrapRef.current;
@@ -484,39 +727,83 @@ export function Player() {
   // keyboard
   useEffect(() => {
     if (!current) return;
+    const live = current.kind === "live";
     const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       switch (e.key) {
         case " ":
           e.preventDefault();
           toggle();
           break;
         case "ArrowRight":
-          seek(10);
+          if (live) return;
+          e.preventDefault();
+          seek(e.shiftKey ? 30 : 10);
           break;
         case "ArrowLeft":
-          seek(-10);
+          if (live) return;
+          e.preventDefault();
+          seek(e.shiftKey ? -30 : -10);
           break;
         case "ArrowUp":
+          e.preventDefault();
           setVolume((v) => Math.min(1, v + 0.1));
           break;
         case "ArrowDown":
+          e.preventDefault();
           setVolume((v) => Math.max(0, v - 0.1));
           break;
+        case "j":
+        case "J":
+          if (!live) seek(-10);
+          break;
+        case "l":
+        case "L":
+          if (!live) seek(10);
+          break;
         case "f":
+        case "F":
           toggleFullscreen();
           break;
         case "m":
+        case "M":
           setMuted((m) => !m);
           break;
+        case "?":
+          setHelpOpen((o) => !o);
+          break;
+        case "Home":
+          if (!live) seekToTime(0);
+          break;
+        case "End":
+          if (!live) seekToTime(totalDuration() - 2);
+          break;
         case "Escape":
-          if (tracksOpen) setTracksOpen(false);
+          if (helpOpen) setHelpOpen(false);
+          else if (tracksOpen) setTracksOpen(false);
+          else if (endMode !== null) cancelEnd();
           else if (!document.fullscreenElement) close();
           break;
+        default:
+          if (!live && /^[0-9]$/.test(e.key)) seekToTime(totalDuration() * (Number(e.key) / 10));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, toggle, seek, toggleFullscreen, close, tracksOpen]);
+  }, [
+    current,
+    toggle,
+    seek,
+    toggleFullscreen,
+    close,
+    tracksOpen,
+    helpOpen,
+    endMode,
+    cancelEnd,
+    seekToTime,
+    totalDuration,
+  ]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -536,18 +823,30 @@ export function Player() {
     setShowControls(true);
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (!videoRef.current?.paused) setShowControls(false);
+      const busy = draggingRef.current || endMode !== null || helpOpen || tracksOpen;
+      if (!videoRef.current?.paused && !busy) setShowControls(false);
     }, 3000);
   };
 
   if (!current) return null;
 
   const isLive = current.kind === "live";
-  const pct = duration > 0 ? (position / duration) * 100 : 0;
+  const totalSecs = duration > 0 ? duration : durRef.current;
+  const pct = totalSecs > 0 ? (position / totalSecs) * 100 : 0;
   const hasTracks = audioTracks.length > 1 || subtitleTracks.length > 0 || levels.length > 1;
+  // Zeitleiste: beim Ziehen/Hovern zeigt sie die Vorschau-Position.
+  const previewSecs = hoverPct !== null ? hoverPct * totalSecs : null;
+  const barPct = previewSecs !== null && totalSecs > 0 ? (previewSecs / totalSecs) * 100 : pct;
+  const gripOn = hoverPct !== null || dragging;
   // Im letzten Stück einer Folge wird die nächste angeteasert.
   const upNext =
-    !isLive && !autoOff && !error && duration > 0 && position >= duration - 20 && current.next
+    !isLive &&
+    !autoOff &&
+    !error &&
+    !endMode &&
+    duration > 0 &&
+    position >= duration - 20 &&
+    current.next
       ? current.next
       : null;
 
@@ -560,7 +859,16 @@ export function Player() {
       <video
         ref={videoRef}
         className="h-full w-full bg-black object-contain"
-        onPlay={() => setPlaying(true)}
+        onDoubleClick={(e) => {
+          if (current.kind === "live") return;
+          const r = e.currentTarget.getBoundingClientRect();
+          const left = (e.clientX - r.left) / Math.max(1, r.width) < 0.5;
+          seek(left ? -10 : 10);
+        }}
+        onPlay={() => {
+          setPlaying(true);
+          cancelEnd();
+        }}
         onPause={() => setPlaying(false)}
         onWaiting={() => setLoading(true)}
         onPlaying={() => {
@@ -643,6 +951,19 @@ export function Player() {
         <Play size={34} fill="currentColor" />
       </button>
 
+      {/* Einblender beim Springen (+10 s / −10 s) */}
+      {flash && (
+        <div
+          className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 ${
+            flash.startsWith("+") ? "left-[72%]" : "left-[28%]"
+          }`}
+        >
+          <div className="rounded-2xl bg-black/60 px-5 py-3 text-lg font-bold tabular-nums text-white backdrop-blur">
+            {flash}
+          </div>
+        </div>
+      )}
+
       {/* track panel */}
       {tracksOpen && (
         <div className="absolute bottom-24 right-4 z-10 max-h-[60vh] w-72 overflow-y-auto rounded-2xl border border-white/10 bg-[#14161f]/95 p-3 text-sm shadow-2xl backdrop-blur">
@@ -688,12 +1009,32 @@ export function Player() {
             </TrackGroup>
           )}
 
-          {!hasTracks && <div className="px-1 py-2 text-white/60">—</div>}
+          {!isLive && (
+            <TrackGroup title={t("player.speed")}>
+              <div className="flex flex-wrap gap-1 px-1">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setSpeed(r)}
+                    className={`rounded-lg px-2 py-1 text-xs font-semibold tabular-nums transition ${
+                      speed === r
+                        ? "bg-[var(--accent)]/30 text-white"
+                        : "bg-white/5 text-white/75 hover:bg-white/15"
+                    }`}
+                  >
+                    {r.toLocaleString(appLang === "de" ? "de-DE" : "en-US")}×
+                  </button>
+                ))}
+              </div>
+            </TrackGroup>
+          )}
+
+          {!hasTracks && isLive && <div className="px-1 py-2 text-white/60">—</div>}
         </div>
       )}
 
       {/* „Als Nächstes": läuft eine Folge aus, wird die folgende angeteasert. */}
-      {upNext && (
+      {upNext && !endMode && !tracksOpen && !helpOpen && (
         <div className="absolute inset-x-0 bottom-32 z-10 flex justify-center px-5">
           <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-black/75 px-4 py-3 backdrop-blur">
             <div className="min-w-0">
@@ -720,6 +1061,129 @@ export function Player() {
         </div>
       )}
 
+      {/* Endkarte: am Ende einer Folge die nächste anbieten */}
+      {endMode && (
+        <div
+          className="absolute inset-0 z-20 flex items-end justify-center bg-black/55 px-4 pb-32 backdrop-blur-sm sm:items-center sm:pb-0"
+          onClick={cancelEnd}
+        >
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-[#14161f]/95 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex gap-4 p-5">
+              <div className="relative hidden h-24 w-40 shrink-0 overflow-hidden rounded-xl bg-black sm:block">
+                {current.poster && (
+                  <img src={current.poster} alt="" className="h-full w-full object-cover opacity-70" />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Play size={26} fill="currentColor" className="text-white/90" />
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-widest text-white/50">
+                  {endMode === "next" ? t("player.epsEnd") : t("player.seriesEnd")}
+                </div>
+                <div className="mt-1 text-base font-bold leading-snug text-white">
+                  {endMode === "next"
+                    ? current.next?.subtitle || current.next?.title
+                    : current.title}
+                </div>
+                <div className="mt-0.5 truncate text-xs text-white/55">
+                  {endMode === "next" ? current.title : t("player.seriesEndHint")}
+                </div>
+                {endMode === "next" && endIn > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 text-xs font-semibold text-[var(--accent-2)]">
+                      {t("player.autoIn", { s: endIn })}
+                    </div>
+                    <div className="h-1 w-full overflow-hidden rounded-full bg-white/15">
+                      <div
+                        className="h-full rounded-full bg-[var(--accent-2)] transition-[width] duration-1000 ease-linear"
+                        style={{ width: `${(endIn / END_COUNTDOWN) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={cancelEnd}
+                aria-label={t("common.close")}
+                className="h-8 w-8 shrink-0 rounded-full text-white/60 transition hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} className="mx-auto" />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-white/[0.03] px-5 py-3.5">
+              {endMode === "next" ? (
+                <>
+                  <button
+                    className="btn btn-primary px-4 py-2 text-sm"
+                    onClick={() => {
+                      cancelEnd();
+                      goNextNow();
+                    }}
+                  >
+                    <Play size={16} fill="currentColor" /> {t("player.playNext")}
+                  </button>
+                  {endIn > 0 && (
+                    <button className="btn btn-ghost px-3 py-2 text-sm" onClick={stopAuto}>
+                      {t("player.stopAuto")}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <button className="btn btn-primary px-4 py-2 text-sm" onClick={restart}>
+                  <RotateCcw size={16} /> {t("player.replay")}
+                </button>
+              )}
+              <button className="btn btn-ghost ml-auto px-3 py-2 text-sm" onClick={cancelEnd}>
+                {t("common.close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tastenkürzel-Übersicht */}
+      {helpOpen && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 px-5 backdrop-blur-sm"
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl border border-white/10 bg-[#14161f]/95 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-xs font-bold uppercase tracking-widest text-white/60">
+                {t("player.shortcuts")}
+              </div>
+              <button
+                onClick={() => setHelpOpen(false)}
+                aria-label={t("common.close")}
+                className="h-8 w-8 rounded-full text-white/60 transition hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} className="mx-auto" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {SHORTCUTS.map(([keys, label]) => (
+                <div key={keys} className="flex items-center justify-between gap-4 text-sm">
+                  <span
+                    dir="ltr"
+                    className="rounded-md border border-white/15 bg-white/5 px-2 py-0.5 font-mono text-[11px] text-white/85"
+                  >
+                    {keys}
+                  </span>
+                  <span className="text-white/70">{t(label)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* bottom controls */}
       <div
         className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-5 pb-5 pt-16 transition-opacity duration-300 ${
@@ -729,45 +1193,87 @@ export function Player() {
         {!isLive && (
           <div className="mb-3 flex items-center gap-3">
             <span className="w-14 text-right text-xs tabular-nums text-white/70">
-              {fmtTimeClock(position)}
+              {fmtTimeClock(previewSecs !== null && dragging ? previewSecs : position)}
             </span>
-            <div className="relative flex-1">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={0.1}
-                value={pct}
-                onChange={(e) => {
-                  const v = videoRef.current;
-                  if (v && duration > 0) v.currentTime = (Number(e.target.value) / 100) * duration;
-                }}
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-[var(--accent-2)]"
-                style={{
-                  background: `linear-gradient(to right, var(--accent-2) ${pct}%, rgba(255,255,255,0.2) ${pct}%)`,
-                }}
-              />
-              {/* Sprungmarken im Balken: Anfang + zwei Drittel */}
-              {[0, 66.6].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => seekTo(f / 100)}
-                  title={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
-                  aria-label={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
-                  className={`absolute top-1/2 -translate-y-1/2 ${
-                    f === 0 ? "-translate-x-1/2" : "translate-x-0"
+
+            {/* Zeitleiste: klick- und ziehbar, mit Vorschau-Zeit und Pufferspur. */}
+            <div
+              role="slider"
+              tabIndex={0}
+              aria-label={t("player.seek")}
+              aria-valuemin={0}
+              aria-valuemax={Math.round(totalSecs)}
+              aria-valuenow={Math.round(position)}
+              className="group relative flex flex-1 touch-none cursor-pointer items-center rounded-full py-3 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+              onPointerDown={onBarDown}
+              onPointerMove={onBarMove}
+              onPointerUp={onBarUp}
+              onPointerCancel={onBarUp}
+              onPointerLeave={() => {
+                if (!draggingRef.current) setHoverPct(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") seek(e.shiftKey ? 30 : 10);
+                else if (e.key === "ArrowLeft") seek(e.shiftKey ? -30 : -10);
+              }}
+            >
+              <div className="relative h-1.5 w-full rounded-full bg-white/20 transition-all duration-150 group-hover:h-2.5">
+                {/* Puffer */}
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-white/25"
+                  style={{ width: `${Math.min(100, bufferedPct)}%` }}
+                />
+                {/* Gesehen */}
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: `${barPct}%`,
+                    background: "linear-gradient(90deg, var(--accent), var(--accent-2))",
+                  }}
+                />
+                {/* Griff */}
+                <div
+                  className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--accent-2)] shadow-lg transition-all duration-150 ${
+                    gripOn ? "h-3.5 w-3.5 opacity-100" : "h-1.5 w-1.5 opacity-0"
                   }`}
-                  style={{ left: `${f}%` }}
+                  style={{ left: `${barPct}%` }}
+                />
+                {/* Sprungmarken im Balken: Anfang + zwei Drittel */}
+                {[0, 66.6].map((f) => (
+                  <button
+                    key={f}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seekTo(f / 100);
+                    }}
+                    title={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
+                    aria-label={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
+                    className={`absolute top-1/2 -translate-y-1/2 ${
+                      f === 0 ? "-translate-x-1/2" : "translate-x-0"
+                    }`}
+                    style={{ left: `${f}%` }}
+                  >
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-black/45 text-white/90 transition hover:scale-110 hover:border-white hover:bg-black/80">
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+                        <path d="M0 0h6L3 4l3 4H0z" />
+                      </svg>
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Vorschau-Zeit über dem Zeiger */}
+              {previewSecs !== null && totalSecs > 0 && (
+                <div
+                  className="pointer-events-none absolute -top-2 -translate-x-1/2 rounded-lg bg-black/85 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-white shadow-lg"
+                  style={{ left: `${barPct}%` }}
                 >
-                  <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-black/45 text-white/90 transition hover:scale-110 hover:border-white hover:bg-black/80">
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-                      <path d="M0 0h6L3 4l3 4H0z" />
-                    </svg>
-                  </span>
-                </button>
-              ))}
+                  {fmtTimeClock(previewSecs)}
+                </div>
+              )}
             </div>
-            <span className="w-14 text-xs tabular-nums text-white/70">{fmtTimeClock(duration)}</span>
+
+            <span className="w-14 text-xs tabular-nums text-white/70">{fmtTimeClock(totalSecs)}</span>
           </div>
         )}
 
@@ -813,6 +1319,16 @@ export function Player() {
           </div>
 
           <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => setHelpOpen((o) => !o)}
+              className={`transition ${
+                helpOpen ? "text-[var(--accent-2)]" : "text-white/80 hover:text-white"
+              }`}
+              title={t("player.shortcuts")}
+              aria-label={t("player.shortcuts")}
+            >
+              <Keyboard size={22} />
+            </button>
             <button
               onClick={() => setTracksOpen((o) => !o)}
               className={`transition ${

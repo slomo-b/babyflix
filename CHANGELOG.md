@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.3.0] — 2026-10-11
+
+### Added
+- **End-of-episode card with countdown.** When an episode ends, the player now shows a card with
+  the next episode (poster, season/episode, series title), a **10-second countdown** and the
+  actions *Play now*, *Stop automatic* and *Close*. For the last episode of a series it offers
+  *Replay* instead. The countdown only starts when *Autoplay next episode* is enabled in
+  Settings → Playback — otherwise the card simply waits for a click.
+- **Rebuilt seek bar.** The timeline is a real slider: drag the handle anywhere (the target time is
+  previewed while you scrub), hover for a time tooltip, and the track now shows the filled progress
+  plus the buffered part behind it and two quick-jump markers (start / two-thirds). Double-clicking
+  the left or right half of the video jumps −10 s / +10 s, with the amount flashed on screen.
+- **Playback speed** selection (0.5× to 2×) in the track panel and a **keyboard shortcut overview**
+  via `?` (or the keyboard button in the control bar).
+- **More keyboard control:** `0`–`9` jump to a tenth of the episode, `Space`/`K` play-pause,
+  `←`/`→` 10 s, `Shift`+`←`/`→` 30 s, `↑`/`↓` volume, `M` mute, `F` fullscreen, `Home`/`End`
+  start/end, `Esc` close (card › panel › player).
+
+### Fixed
+- **Seeking can no longer land in a dead spot.** Every jump is clamped to the range the video
+  actually reports as seekable, so seeking near the end no longer leaves the player stuck.
+- **The progress bar no longer stays empty** when the remux backend reports no duration: the
+  length is now also taken from the video element, so track, handle and tooltip keep working.
+- The *Up next* banner hides while the track panel or the shortcut overview is open, and the seek
+  bar uses a proper focus ring instead of the browser's default outline.
+
 ## [1.2.0] — 2026-10-11
 
 ### Added
