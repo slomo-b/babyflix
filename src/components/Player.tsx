@@ -107,6 +107,10 @@ export function Player() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // bumping this re-runs the load effect (retry button)
   const [reloadKey, setReloadKey] = useState(0);
+  // Automatisches Weiterspielen am Episodenende: `autoOff` schaltet es für die
+  // gerade laufende Folge ab (Knopf im „Als Nächstes"-Band).
+  const [autoOff, setAutoOff] = useState(false);
+  const autoOffRef = useRef(false);
 
   const streamKey = current ? `${current.kind}:${current.id}` : "";
 
@@ -130,7 +134,16 @@ export function Player() {
     setRemuxAudio(0);
     setForceRemux(false);
     autoAudioRef.current = false;
+    autoOffRef.current = false;
+    setAutoOff(false);
   }, [streamKey]);
+
+  // Echte Episodenlänge (vom Backend geprobt) für den Enden-Wächter bereithalten:
+  // Bei HLS-„event"-Streams meldet das Video-Element bis zum Schluss „Infinity".
+  const durRef = useRef(0);
+  useEffect(() => {
+    durRef.current = duration;
+  }, [duration]);
 
   // load stream
   useEffect(() => {
@@ -263,6 +276,28 @@ export function Player() {
     startPlayback();
 
     const resume = history.find((h) => h.key === current.historyKey);
+
+    // Nächste Folge starten – genutzt von „ended" und vom Wächter unten.
+    const goNext = () => {
+      const nx = current.next;
+      if (!nx) return;
+      play({
+        kind: nx.kind,
+        id: nx.id,
+        ext: nx.ext,
+        title: nx.title,
+        subtitle: nx.subtitle,
+        poster: current.poster,
+        historyKey: `${nx.kind}:${nx.id}`,
+      });
+    };
+    let endTimer: number | null = null;
+    const onEnded = () => {
+      setPlaying(false);
+      if (autoOffRef.current) return;
+      if (autoplayNext && current.next) goNext();
+    };
+
     const onLoaded = () => {
       if (!remuxRef.current) {
         setDuration(Number.isFinite(video.duration) ? video.duration : 0);
@@ -282,13 +317,34 @@ export function Player() {
       } else if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
         video.currentTime = resume.position;
       }
+      // Quelle wirklich anspielen – auch die automatisch nachgeschobene Folge,
+      // bei der kein Klick des Nutzers mehr kommt.
+      const started = video.play();
+      if (started && typeof started.catch === "function") started.catch(() => {});
     };
     const onTime = () => {
       setPosition(video.currentTime);
+      const elDur = Number.isFinite(video.duration) ? video.duration : 0;
+      const dur = elDur > 0 ? elDur : durRef.current;
       const now = Date.now();
       if (now - lastSave.current > 4000) {
         lastSave.current = now;
-        persist(video.currentTime, Number.isFinite(video.duration) ? video.duration : 0);
+        persist(video.currentTime, dur);
+      }
+      // Wächter: FFmpeg-Remux-Streams (HLS „event") melden am Ende nicht immer
+      // ein „ended". Stockt die Wiedergabe am Ende, wird trotzdem weitergeschaltet.
+      if (autoplayNext && current.next && !autoOffRef.current && current.kind !== "live") {
+        if (dur > 0 && !video.paused && video.currentTime >= dur - 1.5) {
+          if (endTimer === null) {
+            endTimer = window.setTimeout(() => {
+              endTimer = null;
+              if (!cancelled) onEnded();
+            }, 2500);
+          }
+        } else if (endTimer !== null) {
+          window.clearTimeout(endTimer);
+          endTimer = null;
+        }
       }
     };
     const onErr = () => {
@@ -308,13 +364,16 @@ export function Player() {
 
     video.addEventListener("loadedmetadata", onLoaded);
     video.addEventListener("timeupdate", onTime);
+    video.addEventListener("ended", onEnded);
     video.addEventListener("error", onErr);
     const p = video.play();
     if (p && typeof p.catch === "function") p.catch(() => {});
     return () => {
       cancelled = true;
+      if (endTimer !== null) window.clearTimeout(endTimer);
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("timeupdate", onTime);
+      video.removeEventListener("ended", onEnded);
       video.removeEventListener("error", onErr);
       cleanup();
       video.removeAttribute("src");
@@ -349,6 +408,21 @@ export function Player() {
     cleanup();
     stop();
   }, [persist, stop, cleanup]);
+
+  /** „Jetzt abspielen" im Als-Nächstes-Band. */
+  const goNextNow = useCallback(() => {
+    const nx = current?.next;
+    if (!nx || !current) return;
+    play({
+      kind: nx.kind,
+      id: nx.id,
+      ext: nx.ext,
+      title: nx.title,
+      subtitle: nx.subtitle,
+      poster: current.poster,
+      historyKey: `${nx.kind}:${nx.id}`,
+    });
+  }, [current, play]);
 
   const toggle = useCallback(() => {
     const v = videoRef.current;
@@ -471,6 +545,11 @@ export function Player() {
   const isLive = current.kind === "live";
   const pct = duration > 0 ? (position / duration) * 100 : 0;
   const hasTracks = audioTracks.length > 1 || subtitleTracks.length > 0 || levels.length > 1;
+  // Im letzten Stück einer Folge wird die nächste angeteasert.
+  const upNext =
+    !isLive && !autoOff && !error && duration > 0 && position >= duration - 20 && current.next
+      ? current.next
+      : null;
 
   return (
     <div
@@ -487,20 +566,6 @@ export function Player() {
         onPlaying={() => {
           setLoading(false);
           setPlaying(true);
-        }}
-        onEnded={() => {
-          setPlaying(false);
-          if (autoplayNext && current.next) {
-            play({
-              kind: current.next.kind,
-              id: current.next.id,
-              ext: current.next.ext,
-              title: current.next.title,
-              subtitle: current.next.subtitle,
-              poster: current.poster,
-              historyKey: `${current.next.kind}:${current.next.id}`,
-            });
-          }
         }}
         playsInline
       />
@@ -624,6 +689,34 @@ export function Player() {
           )}
 
           {!hasTracks && <div className="px-1 py-2 text-white/60">—</div>}
+        </div>
+      )}
+
+      {/* „Als Nächstes": läuft eine Folge aus, wird die folgende angeteasert. */}
+      {upNext && (
+        <div className="absolute inset-x-0 bottom-32 z-10 flex justify-center px-5">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-black/75 px-4 py-3 backdrop-blur">
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-widest text-white/50">
+                {t("player.next")}
+              </div>
+              <div className="max-w-[52vw] truncate text-sm font-semibold text-white">
+                {upNext.subtitle || upNext.title}
+              </div>
+            </div>
+            <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={goNextNow}>
+              <Play size={14} fill="currentColor" /> {t("player.playNext")}
+            </button>
+            <button
+              className="shrink-0 rounded-full px-2 py-1 text-xs text-white/60 transition hover:text-white"
+              onClick={() => {
+                autoOffRef.current = true;
+                setAutoOff(true);
+              }}
+            >
+              {t("player.skipNext")}
+            </button>
+          </div>
         </div>
       )}
 

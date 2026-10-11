@@ -4,14 +4,17 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.1.0
+## 🆕 What's new in 1.2.0
 
-- ⬇️ **FFmpeg is set up automatically.** If no system FFmpeg is found, BabyFlix downloads a
-  static **FFmpeg + FFprobe** for your platform on first start (one-time, stored in the app
-  data folder). **No Homebrew install needed on macOS.** An existing system install is still
-  preferred.
-- 🛠️ Builds on the 1.0.10 macOS fixes (FFmpeg lookup, plain-HTTP/ATS exemptions, visible
-  playback errors with a Retry button).
+- ⏭️ **Automatic next episode.** When an episode ends, the next one starts by itself — also
+  across a season boundary. In the last 20 seconds a small **Up next** banner shows what is
+  coming, with *Play now* and *Skip*.
+- 💡 **Last watched episode is highlighted.** In a series, the season and series view mark the
+  episode you watched last (accented card, *Last watched* badge, progress bar per episode), and
+  the series opens on that season. The main button becomes **Resume: S1 · E2** and continues
+  exactly there.
+- 🛠️ **More reliable episode endings.** Streams that never report a proper "ended" event now
+  still advance, and a chained episode always starts playing on its own.
 
 ## ✨ Highlights
 

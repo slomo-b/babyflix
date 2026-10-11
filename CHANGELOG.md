@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0] — 2026-10-11
+
+### Added
+- **Automatic next episode.** When an episode finishes, BabyFlix now starts the next one
+  automatically — including across a season boundary. The player also shows an **Up next**
+  banner in the last 20 seconds with *Play now* and *Skip*; the existing *Autoplay next episode*
+  setting in Settings → Playback still controls the automatic behaviour.
+- **Last watched episode is highlighted.** In a series, the episode list marks the episode you
+  watched most recently (accented card, *Last watched* badge, progress bar per episode) and the
+  series page opens on that episode's season. The main button becomes
+  **Resume: S1 · E2** and continues that episode where you left off; the episode list header
+  shows which episode that is.
+
+### Fixed
+- **Episodes now start playing on their own when they are chained automatically.** The player
+  explicitly starts the source once metadata is ready, so an auto-advanced episode never sits
+  there paused.
+- **More reliable end-of-episode detection.** Some remuxed streams (FFmpeg HLS) never fire the
+  video's `ended` event; playback stalling at the very end is now detected as well, which is what
+  used to leave series stuck on the last frame.
+
 ## [1.1.0] — 2026-10-09
 
 ### Added

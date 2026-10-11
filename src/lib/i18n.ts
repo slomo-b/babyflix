@@ -144,6 +144,8 @@ const de: Record<string, string> = {
   // detail
   "detail.firstEpisode": "Erste Folge",
   "detail.noEpisodes": "Keine Folgen",
+  "detail.lastWatched": "Zuletzt gesehen",
+  "detail.continueWith": "Weiterschauen: {ep}",
   "detail.addFavorite": "Zur Merkliste",
   "detail.resume": "Weiterschauen",
   "detail.resumeAsk": "Weiterschauen ab {time}?",
@@ -212,6 +214,9 @@ const de: Record<string, string> = {
   "player.auto": "Automatisch",
   "player.jumpIntro": "Zum Anfang springen",
   "player.jumpOutro": "Vorspulen (zwei Drittel)",
+  "player.next": "Als Nächstes",
+  "player.playNext": "Jetzt abspielen",
+  "player.skipNext": "Überspringen",
   "player.streamError":
     "Stream konnte nicht geladen werden. Der Sender/Film ist evtl. gerade nicht verfügbar.",
   "player.errUnsupported":
@@ -332,6 +337,8 @@ const en: Record<string, string> = {
 
   "detail.firstEpisode": "First episode",
   "detail.noEpisodes": "No episodes",
+  "detail.lastWatched": "Last watched",
+  "detail.continueWith": "Resume: {ep}",
   "detail.addFavorite": "Add to watchlist",
   "detail.resume": "Resume",
   "detail.resumeAsk": "Resume from {time}?",
@@ -398,6 +405,9 @@ const en: Record<string, string> = {
   "player.auto": "Auto",
   "player.jumpIntro": "Jump to start",
   "player.jumpOutro": "Skip ahead (two thirds)",
+  "player.next": "Up next",
+  "player.playNext": "Play now",
+  "player.skipNext": "Skip",
   "player.streamError": "Stream could not be loaded. The channel/movie may be unavailable right now.",
   "player.errUnsupported": "This stream cannot be played (unsupported format or codec).",
   "player.errCode": "Playback error (code {code}).",

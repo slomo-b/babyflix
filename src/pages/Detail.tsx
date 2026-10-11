@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Film, Heart, Info, Play, Star, X } from "lucide-react";
@@ -46,9 +46,49 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
     [seasons]
   );
 
+  /** Zuletzt gesehene Folge dieser Serie (jüngster Verlaufseintrag einer Folge). */
+  const lastWatched = useMemo(() => {
+    const ids = new Set(flatEpisodes.map((e) => e.id));
+    return history
+      .filter((h) => h.kind === "series" && ids.has(h.id))
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  }, [history, flatEpisodes]);
+  const lastWatchedEp = lastWatched
+    ? flatEpisodes.find((e) => e.id === lastWatched.id)
+    : undefined;
+
+  /** Fortschritt einer Folge in Prozent (0 = unangetastet). */
+  const progressOf = (epId: string): number => {
+    const h = history.find((x) => x.key === `series:${epId}`);
+    if (!h || h.duration <= 0) return 0;
+    return Math.min(100, Math.max(0, (h.position / h.duration) * 100));
+  };
+
+  /** Startposition beim Fortsetzen – mitten in der Folge, nicht am Anfang/Ende. */
+  const resumeStartFor = (ep: Episode & { season: number }): number | undefined => {
+    const h = history.find((x) => x.key === `series:${ep.id}`);
+    if (!h || h.duration <= 0) return undefined;
+    if (h.position <= 60 || h.position >= h.duration - 60) return undefined;
+    return h.position;
+  };
+
+  // Beim Serienwechsel zurück auf die erste Staffel.
   useEffect(() => {
     setSeasonIdx(0);
     setResumeBanner(false);
+  }, [id, kind]);
+
+  // Serie öffnen: die Staffel der zuletzt gesehenen Folge zeigen.
+  const positionedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (kind !== "series" || !lastWatchedEp || seasons.length === 0) return;
+    if (positionedRef.current === id) return;
+    const idx = seasons.findIndex((s) => s.number === lastWatchedEp.season);
+    if (idx >= 0) setSeasonIdx(idx);
+    positionedRef.current = id;
+  }, [id, kind, lastWatchedEp, seasons]);
+
+  useEffect(() => {
     // Nur Filme: ein begonnener Film bekommt beim Öffnen ein „Weiterschauen?"-Band.
     if (kind !== "movie") return;
     const h = history.find((x) => x.key === `movie:${id}`);
@@ -102,7 +142,14 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
     return p > 1 && p < 98 ? p : 0;
   })();
 
-  const playEpisode = (ep: Episode & { season: number }) => {
+  /** Fortschritt der zuletzt gesehenen Folge (0 = nicht begonnen / durch). */
+  const seriesProgress = (() => {
+    if (!lastWatchedEp) return 0;
+    const p = progressOf(lastWatchedEp.id);
+    return p > 1 && p < 98 ? p : 0;
+  })();
+
+  const playEpisode = (ep: Episode & { season: number }, startAt?: number) => {
     if (!item) return;
     const idx = flatEpisodes.findIndex((e) => e.id === ep.id);
     const next = idx >= 0 ? flatEpisodes[idx + 1] : undefined;
@@ -114,6 +161,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
       poster: ep.cover ?? item.cover ?? undefined,
       subtitle: `S${ep.season} · E${ep.num} – ${ep.title}`,
       historyKey: `series:${ep.id}`,
+      startAt,
       next: next
         ? {
             kind: "series",
@@ -261,12 +309,29 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
               </button>
             ) : (
               <button
-                className="btn btn-primary py-3.5 text-base"
-                onClick={() => firstEpisode && playEpisode(firstEpisode)}
+                className="btn btn-primary relative overflow-hidden py-3.5 text-base"
+                onClick={() => {
+                  if (lastWatchedEp) playEpisode(lastWatchedEp, resumeStartFor(lastWatchedEp));
+                  else if (firstEpisode) playEpisode(firstEpisode);
+                }}
                 disabled={!firstEpisode}
               >
-                <Play size={20} fill="currentColor" />{" "}
-                {firstEpisode ? t("detail.firstEpisode") : t("detail.noEpisodes")}
+                {seriesProgress > 0 && (
+                  <span
+                    className="absolute inset-y-0 left-0 bg-white/25"
+                    style={{ width: `${seriesProgress}%` }}
+                  />
+                )}
+                <span className="relative flex items-center gap-2">
+                  <Play size={20} fill="currentColor" />{" "}
+                  {lastWatchedEp
+                    ? t("detail.continueWith", {
+                        ep: `S${lastWatchedEp.season} · E${lastWatchedEp.num}`,
+                      })
+                    : firstEpisode
+                      ? t("detail.firstEpisode")
+                      : t("detail.noEpisodes")}
+                </span>
               </button>
             )}
 
@@ -393,7 +458,14 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
           {kind === "series" && seasons.length > 0 && (
             <div className="mt-10">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-bold tracking-tight">{t("detail.episodes")}</h2>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h2 className="text-lg font-bold tracking-tight">{t("detail.episodes")}</h2>
+                  {lastWatchedEp && (
+                    <span className="rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/15 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-2)]">
+                      {t("detail.lastWatched")}: S{lastWatchedEp.season} · E{lastWatchedEp.num}
+                    </span>
+                  )}
+                </div>
                 <Select
                   value={String(seasonIdx)}
                   onChange={(v) => setSeasonIdx(Number(v))}
@@ -410,11 +482,17 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                 {activeEpisodes.map((ep) => {
                   const epWithSeason = { ...ep, season: activeSeason?.number ?? 1 };
                   const cover = imgUrl(ep.cover ?? item.cover);
+                  const isLastWatched = lastWatchedEp?.id === ep.id;
+                  const epProgress = progressOf(ep.id);
                   return (
                     <button
                       key={ep.id}
-                      onClick={() => playEpisode(epWithSeason)}
-                      className="group flex w-full items-center gap-4 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-3 text-left transition hover:border-[var(--accent)]/40 hover:bg-white/[0.07]"
+                      onClick={() => playEpisode(epWithSeason, resumeStartFor(epWithSeason))}
+                      className={`group relative flex w-full items-center gap-4 overflow-hidden rounded-2xl border p-3 text-left transition ${
+                        isLastWatched
+                          ? "border-[var(--accent)]/60 bg-[var(--accent)]/[0.12] ring-1 ring-[var(--accent)]/30"
+                          : "border-[var(--border)] bg-white/[0.03] hover:border-[var(--accent)]/40 hover:bg-white/[0.07]"
+                      }`}
                     >
                       <span className="relative flex aspect-video w-36 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--surface-2)] sm:w-40">
                         {cover ? (
@@ -425,6 +503,12 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                         <span className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
                           <Play size={22} fill="white" className="text-white" />
                         </span>
+                        {epProgress > 0 && (
+                          <span
+                            className="absolute inset-x-0 bottom-0 h-1 bg-[var(--accent)]"
+                            style={{ width: `${epProgress}%` }}
+                          />
+                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
@@ -432,6 +516,11 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                             {ep.num}
                           </span>
                           <span className="truncate text-sm font-semibold">{ep.title}</span>
+                          {isLastWatched && (
+                            <span className="shrink-0 rounded-full bg-[var(--accent)]/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent-2)]">
+                              {t("detail.lastWatched")}
+                            </span>
+                          )}
                         </span>
                         {ep.plot && (
                           <span className="mt-1 line-clamp-2 block text-xs text-[var(--muted)]">
