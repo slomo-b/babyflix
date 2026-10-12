@@ -66,6 +66,7 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "ratings_loaded": ratings_loaded,
         "ffmpeg": app.remux.ffmpeg_path(),
         "ffprobe": app.remux.ffprobe_path(),
+        "mpv": app.mpv.path(),
     }))
 }
 
@@ -514,26 +515,7 @@ async fn player(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
-    let url = if s.source == "m3u" {
-        let item = app
-            .find_item(&q.id)
-            .await
-            .ok_or(ApiError("Item not found.".into()))?;
-        let raw = item
-            .url
-            .clone()
-            .ok_or(ApiError("No stream URL available for this item.".into()))?;
-        m3u::hls_candidate(&app.client, &raw, &item.kind, &s.ua)
-            .await
-            .unwrap_or(raw)
-    } else {
-        let ext = q
-            .ext
-            .clone()
-            .filter(|e| !e.is_empty())
-            .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
-        xtream::stream_url(&s, &q.kind, &q.id, &ext)
-    };
+    let url = play_url(&app, &s, &q.kind, &q.id, q.ext.clone()).await?;
     let range = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
@@ -542,6 +524,124 @@ async fn player(
         .await
         .map_err(Into::into)
 }
+
+/// Resolve the playable URL for an item - identical for every playback engine.
+async fn play_url(
+    app: &Arc<App>,
+    s: &xtream::Session,
+    kind: &str,
+    id: &str,
+    ext: Option<String>,
+) -> Result<String, ApiError> {
+    if s.source == "m3u" {
+        let item = app
+            .find_item(id)
+            .await
+            .ok_or(ApiError("Item not found.".into()))?;
+        let raw = item
+            .url
+            .clone()
+            .ok_or(ApiError("No stream URL available for this item.".into()))?;
+        Ok(m3u::hls_candidate(&app.client, &raw, &item.kind, &s.ua)
+            .await
+            .unwrap_or(raw))
+    } else {
+        let ext = ext
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| xtream::preferred_ext(s, kind, None));
+        Ok(xtream::stream_url(s, kind, id, &ext))
+    }
+}
+
+#[derive(Deserialize)]
+struct MpvStartReq {
+    kind: String,
+    id: String,
+    #[serde(default)]
+    ext: Option<String>,
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    audio: Option<i64>,
+    #[serde(default)]
+    sub: Option<i64>,
+    #[serde(default)]
+    volume: Option<i64>,
+    #[serde(default)]
+    muted: Option<bool>,
+    #[serde(default)]
+    speed: Option<f64>,
+    #[serde(default)]
+    fullscreen: Option<bool>,
+    #[serde(default)]
+    ontop: Option<bool>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    alang: Option<String>,
+    #[serde(default)]
+    slang: Option<String>,
+}
+
+async fn mpv_start(State(app): State<Arc<App>>, Json(q): Json<MpvStartReq>) -> ApiResult {
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    let url = play_url(&app, &s, &q.kind, &q.id, q.ext.clone()).await?;
+    let opts = crate::mpv::StartOpts {
+        title: q.title.clone(),
+        start: q.start,
+        audio: q.audio,
+        sub: q.sub,
+        volume: q.volume,
+        muted: q.muted,
+        speed: q.speed,
+        fullscreen: q.fullscreen,
+        ontop: q.ontop,
+        alang: q.alang.clone(),
+        slang: q.slang.clone(),
+        user_agent: Some(s.ua.clone()),
+    };
+    let app2 = app.clone();
+    let res = tokio::task::spawn_blocking(move || app2.mpv.start(&url, &opts))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
+    Ok(Json(res))
+}
+
+#[derive(Deserialize)]
+struct MpvCmdReq {
+    command: Vec<Value>,
+}
+
+async fn mpv_cmd(State(app): State<Arc<App>>, Json(q): Json<MpvCmdReq>) -> ApiResult {
+    let app2 = app.clone();
+    tokio::task::spawn_blocking(move || app2.mpv.cmd(q.command))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct SinceQ {
+    #[serde(default)]
+    since: u64,
+}
+
+async fn mpv_poll(State(app): State<Arc<App>>, Query(q): Query<SinceQ>) -> Json<Value> {
+    Json(app.mpv.poll(q.since))
+}
+
+async fn mpv_status(State(app): State<Arc<App>>) -> Json<Value> {
+    Json(app.mpv.status())
+}
+
+async fn mpv_stop(State(app): State<Arc<App>>) -> Json<Value> {
+    let app2 = app.clone();
+    let _ = tokio::task::spawn_blocking(move || app2.mpv.stop()).await;
+    Json(json!({ "ok": true }))
+}
+
 
 #[derive(Deserialize)]
 struct UrlQ {
@@ -749,10 +849,327 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/player", get(player))
         .route("/api/remux", get(remux_start))
         .route("/api/remux/stop", get(remux_stop))
+        .route("/api/mpv/status", get(mpv_status))
+        .route("/api/mpv/start", post(mpv_start))
+        .route("/api/mpv/cmd", post(mpv_cmd))
+        .route("/api/mpv/poll", get(mpv_poll))
+        .route("/api/mpv/stop", post(mpv_stop))
         .route("/api/streams", get(streams))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
         .route("/api/img", get(img_h))
         .layer(CorsLayer::permissive())
         .with_state(app)
+}
+
+#[cfg(test)]
+mod mpv_http_tests {
+    //! End-to-end test of the native engine over the real HTTP surface the app uses:
+    //! test media server -> fake xtream session -> play_url -> MPV process -> poll.
+    //! Skipped unless `mpv` and a short clip are available (env `BABYFLIX_MPV_TESTCLIP`).
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn clip() -> Option<PathBuf> {
+        if let Ok(p) = std::env::var("BABYFLIX_MPV_TESTCLIP") {
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        let fallback = PathBuf::from("/tmp/mpvtest/clip.mp4");
+        if fallback.is_file() {
+            Some(fallback)
+        } else {
+            None
+        }
+    }
+
+    /// Minimal HTTP file server with Range support (mpv seeks via Range requests).
+    async fn serve(data: Arc<Vec<u8>>, listener: tokio::net::TcpListener) {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let data = data.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let total = data.len();
+                let range = head
+                    .lines()
+                    .find(|l| l.to_ascii_lowercase().starts_with("range:"))
+                    .and_then(|l| {
+                        let raw = l.split(':').nth(1)?.trim().trim_start_matches("bytes=").to_string();
+                        let (a, b) = raw.split_once('-')?;
+                        let start: usize = a.trim().parse().ok()?;
+                        let end = if b.trim().is_empty() {
+                            total.saturating_sub(1)
+                        } else {
+                            b.trim().parse::<usize>().ok()?
+                        };
+                        Some((start, end))
+                    });
+                let (status, start, end) = match range {
+                    Some((s, e)) if s < total => ("206 Partial Content", s, e.min(total.saturating_sub(1))),
+                    _ => ("200 OK", 0, total.saturating_sub(1)),
+                };
+                let body = &data[start..=end];
+                let mut hdr = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n",
+                    body.len()
+                );
+                if status.starts_with("206") {
+                    hdr.push_str(&format!("Content-Range: bytes {start}-{end}/{total}\r\n"));
+                }
+                hdr.push_str("\r\n");
+                let _ = sock.write_all(hdr.as_bytes()).await;
+                let _ = sock.write_all(body).await;
+                let _ = sock.flush().await;
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn engine_plays_over_the_http_api() {
+        let Some(clip) = clip() else {
+            eprintln!("[mpv-http-test] skipped: no test clip available");
+            return;
+        };
+        std::env::set_var("BABYFLIX_MPV_VO", "null");
+        std::env::set_var("BABYFLIX_MPV_HWDEC", "no");
+        std::env::set_var("BABYFLIX_MPV_PROFILE", "none");
+        std::env::set_var("BABYFLIX_MPV_EXTRA", "--ao=null --no-config --really-quiet");
+
+        // 1. Media server that stands in for the IPTV provider.
+        let media = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let media_port = media.local_addr().unwrap().port();
+        let bytes = Arc::new(std::fs::read(&clip).expect("clip readable"));
+        tokio::spawn(serve(bytes, media));
+
+        // 2. App with a fake session; the stream URL is built from these credentials.
+        let app = App::new(std::env::temp_dir().join("babyflix-mpv-http-test"));
+        assert!(app.mpv.available(), "mpv binary must be found");
+        app.set_session(xtream::Session {
+            creds: Credentials {
+                base_url: format!("http://127.0.0.1:{media_port}"),
+                username: "user".into(),
+                password: "pass".into(),
+            },
+            user_info: json!({}),
+            server_info: json!({}),
+            allowed_exts: vec!["mp4".into()],
+            ua: "BabyFlixTest".into(),
+            source: "xtream".into(),
+            m3u_url: None,
+        })
+        .await;
+
+        // 3. The real API server.
+        let api = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = api.local_addr().unwrap().port();
+        let router = router(app.clone());
+        tokio::spawn(async move {
+            let _ = axum::serve(api, router).await;
+        });
+        let base = format!("http://127.0.0.1:{port}");
+        let http = reqwest::Client::new();
+
+        let status: Value = http
+            .get(format!("{base}/api/mpv/status"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(status["available"], json!(true), "status: {status}");
+        assert_eq!(status["running"], json!(false), "status: {status}");
+
+        let started: Value = http
+            .post(format!("{base}/api/mpv/start"))
+            .json(&json!({
+                "kind": "movie", "id": "123", "ext": "mp4",
+                "start": 1.0, "volume": 25, "muted": true, "ontop": false,
+                "speed": 1.5, "title": "HTTP Test", "alang": "de,en", "slang": "de,en,off"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(started["ok"], json!(true), "start: {started}");
+
+        // 4. Poll exactly like the frontend does until the stream reports progress.
+        let mut seq = 0u64;
+        let mut props = json!({});
+        let mut events: Vec<Value> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(40);
+        loop {
+            let p: Value = http
+                .get(format!("{base}/api/mpv/poll?since={seq}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if p["reset"] == json!(true) {
+                seq = 0;
+            } else {
+                seq = p["seq"].as_u64().unwrap_or(seq);
+            }
+            props = p["props"].clone();
+            if let Some(evs) = p["events"].as_array() {
+                events.extend(evs.iter().cloned());
+            }
+            if props["duration"].as_f64().unwrap_or(0.0) > 0.5
+                && props["time-pos"].as_f64().unwrap_or(0.0) >= 1.0
+            {
+                break;
+            }
+            if Instant::now() > deadline {
+                panic!("timed out: running={} props={props} events={events:?}", p["running"]);
+            }
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+        // Startup options must arrive as the UI reads them back.
+        assert_eq!(props["volume"], json!(25.0), "props: {props}");
+        assert_eq!(props["mute"], json!(true), "props: {props}");
+        assert_eq!(props["ontop"], json!(false), "props: {props}");
+        assert_eq!(props["speed"], json!(1.5), "props: {props}");
+        assert!(
+            props["track-list"].is_array(),
+            "track-list must be a list: {props}"
+        );
+        let duration = props["duration"].as_f64().unwrap_or(0.0);
+        assert!(duration > 1.0, "duration: {duration}");
+
+        // 5. Seek, pause and speed via the command route the UI posts to.
+        for cmd in [
+            json!(["set_property", "time-pos", 3.0]),
+            json!(["set_property", "pause", true]),
+            json!(["set_property", "speed", 1.0]),
+        ] {
+            let r: Value = http
+                .post(format!("{base}/api/mpv/cmd"))
+                .json(&json!({ "command": cmd }))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(r["ok"], json!(true), "cmd {cmd}: {r}");
+        }
+        let seek_deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let p: Value = http
+                .get(format!("{base}/api/mpv/poll?since={seq}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            props = p["props"].clone();
+            if props["time-pos"].as_f64().unwrap_or(0.0) >= 2.9 && props["pause"] == json!(true) {
+                break;
+            }
+            if Instant::now() > seek_deadline {
+                panic!("seek/pause not applied: {props}");
+            }
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+        let paused_at = props["time-pos"].as_f64().unwrap_or(0.0);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let status: Value = http
+            .get(format!("{base}/api/mpv/status"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(status["running"], json!(true), "status: {status}");
+        let after = status["props"]["time-pos"].as_f64().unwrap_or(0.0);
+        assert!(
+            (after - paused_at).abs() < 0.3,
+            "paused playback must not advance ({paused_at} -> {after})"
+        );
+
+        // 6. Resume: the end-of-file event drives the "next episode" card.
+        let _: Value = http
+            .post(format!("{base}/api/mpv/cmd"))
+            .json(&json!({ "command": ["set_property", "pause", false] }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let eof_deadline = Instant::now() + Duration::from_secs(30);
+        let mut saw_eof = false;
+        while Instant::now() < eof_deadline {
+            let p: Value = http
+                .get(format!("{base}/api/mpv/poll?since={seq}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if p["reset"] == json!(true) {
+                seq = 0;
+            } else {
+                seq = p["seq"].as_u64().unwrap_or(seq);
+            }
+            props = p["props"].clone();
+            if let Some(evs) = p["events"].as_array() {
+                events.extend(evs.iter().cloned());
+            }
+            if props["eof-reached"] == json!(true)
+                || events
+                    .iter()
+                    .any(|e| e.get("event").and_then(|v| v.as_str()) == Some("end-file"))
+            {
+                saw_eof = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        assert!(saw_eof, "end of file must be reported: props={props}");
+
+        let stopped: Value = http
+            .post(format!("{base}/api/mpv/stop"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(stopped["ok"], json!(true));
+        let status: Value = http
+            .get(format!("{base}/api/mpv/status"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(status["running"], json!(false), "status after stop: {status}");
+
+        for key in [
+            "BABYFLIX_MPV_VO",
+            "BABYFLIX_MPV_HWDEC",
+            "BABYFLIX_MPV_PROFILE",
+            "BABYFLIX_MPV_EXTRA",
+        ] {
+            std::env::remove_var(key);
+        }
+    }
 }

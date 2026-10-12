@@ -41,14 +41,18 @@ pub struct Remux {
     keys: Mutex<HashMap<String, String>>,
 }
 
+/// Only relevant on Windows: spawn child processes without a console window.
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn hidden(cmd: &mut Command) {
+pub(crate) fn hidden(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    let _ = cmd;
 }
 
 /// File name of an executable on this platform (`ffmpeg` vs `ffmpeg.exe`).
@@ -161,7 +165,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 
 /// Find `name` (ffmpeg / ffprobe):
 /// 1. the env override (file *or* directory), 2. next to the app, 3. PATH, 4. usual dirs.
-fn find_exe(name: &str, env_var: &str) -> Option<PathBuf> {
+pub(crate) fn find_exe(name: &str, env_var: &str) -> Option<PathBuf> {
     let file = exe_file(name);
     if let Some(p) = from_env(env_var, name) {
         return Some(p);

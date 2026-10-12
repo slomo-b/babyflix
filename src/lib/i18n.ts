@@ -244,6 +244,32 @@ const de: Record<string, string> = {
     "FFmpeg wird automatisch eingerichtet (einmaliger Download beim ersten Start). Falls es weiterhin fehlt, prüfe deine Internetverbindung oder installiere es manuell: brew install ffmpeg (macOS), winget install Gyan.FFmpeg (Windows) oder apt install ffmpeg (Linux).",
   "settings.ffmpegPath": "FFmpeg: {path}",
 
+  // Wiedergabe-Engine (nativer MPV)
+  "settings.engine": "Wiedergabe-Engine",
+  "settings.engineHint":
+    "MPV spielt jedes Format direkt in Hardware ab – ohne Umkodierung, mit HDR-Tonemapping und exaktem Spulen.",
+  "settings.engineWeb": "Webview (Standard)",
+  "settings.engineWebHint":
+    "hls.js im App-Fenster. Läuft überall; problematische Tonspuren werden vorher umkodiert.",
+  "settings.engineMpv": "MPV nativ",
+  "settings.engineMpvHint":
+    "Eigener MPV-Prozess im eigenen Fenster – beste Bildqualität sowie Spuren, Tempo und Spulen ohne Umweg.",
+  "settings.engineMpvMissing":
+    "MPV wurde nicht gefunden. Installiere MPV (Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv) und starte BabyFlix neu.",
+  "settings.engineActive": "Aktiv: {name}",
+
+  // nativer MPV-Player
+  "player.mpvBadge": "MPV",
+  "player.mpvStarting": "MPV wird gestartet…",
+  "player.mpvWindow": "Das Bild läuft im MPV-Fenster",
+  "player.mpvWindowHint":
+    "Dieses Fenster ist die Fernbedienung. „Immer im Vordergrund“ hält das Videobild über BabyFlix.",
+  "player.mpvError": "MPV konnte nicht starten.",
+  "player.mpvOntop": "Immer im Vordergrund",
+  "player.mpvFull": "Vollbild im MPV",
+  "player.mpvBuffering": "Puffert…",
+  "player.mpvClose": "MPV beenden",
+
   // rating badge
   "rating.imdb": "IMDb-Bewertung",
   "rating.panel": "Panel-Bewertung",
@@ -450,6 +476,32 @@ const en: Record<string, string> = {
   "settings.ffmpegMissing":
     "FFmpeg is being set up automatically (one-time download on first start). If it stays missing, check your internet connection or install it manually: brew install ffmpeg (macOS), winget install Gyan.FFmpeg (Windows) or apt install ffmpeg (Linux).",
   "settings.ffmpegPath": "FFmpeg: {path}",
+
+  // playback engine (native MPV)
+  "settings.engine": "Playback engine",
+  "settings.engineHint":
+    "MPV plays every format with hardware decoding – no re-encode, with HDR tone mapping and frame-exact seeking.",
+  "settings.engineWeb": "Webview (default)",
+  "settings.engineWebHint":
+    "hls.js inside the app window. Works everywhere; problematic audio tracks are re-encoded first.",
+  "settings.engineMpv": "MPV native",
+  "settings.engineMpvHint":
+    "A dedicated MPV process in its own window – best picture quality plus tracks, speed and seeking.",
+  "settings.engineMpvMissing":
+    "MPV was not found. Install MPV (Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv) and restart BabyFlix.",
+  "settings.engineActive": "Active: {name}",
+
+  // native MPV player
+  "player.mpvBadge": "MPV",
+  "player.mpvStarting": "Starting MPV…",
+  "player.mpvWindow": "The video plays in the MPV window",
+  "player.mpvWindowHint":
+    "This window is the remote control. “Always on top” keeps the video above BabyFlix.",
+  "player.mpvError": "MPV could not start.",
+  "player.mpvOntop": "Always on top",
+  "player.mpvFull": "Fullscreen in MPV",
+  "player.mpvBuffering": "Buffering…",
+  "player.mpvClose": "Quit MPV",
 
   "rating.imdb": "IMDb rating",
   "rating.panel": "Panel rating",

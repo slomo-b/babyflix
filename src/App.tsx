@@ -2,11 +2,13 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
 import { api } from "./lib/api";
+import { useStore } from "./lib/store";
 import { useT } from "./lib/i18n";
 import { useUpdater } from "./lib/updater";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Player } from "./components/Player";
+import { MpvPlayer } from "./components/MpvPlayer";
 import { UpdateBanner } from "./components/UpdateBanner";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
@@ -32,6 +34,7 @@ function Splash() {
 
 export default function App() {
   const qc = useQueryClient();
+  const engine = useStore((s) => s.playerEngine);
   const session = useQuery({ queryKey: ["session"], queryFn: api.session, staleTime: 5000 });
   const health = useQuery({
     queryKey: ["health"],
@@ -88,7 +91,7 @@ export default function App() {
           </Routes>
         </div>
       </main>
-      <Player />
+      {engine === "mpv" ? <MpvPlayer /> : <Player />}
       <UpdateBanner />
     </div>
   );

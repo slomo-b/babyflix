@@ -4,25 +4,27 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.3.0
+## 🆕 What's new in 1.4.0
 
-- 🎬 **End-of-episode card.** When an episode finishes, a card shows what is next with a
-  **10-second countdown** that starts the following episode automatically — or use *Play now*,
-  *Stop automatic* and *Close*. At the end of a series it offers **Replay** instead.
-- 🎚️ **Completely rebuilt seek bar.** Drag the timeline to any position (target time is previewed
-  while scrubbing), hover for a time tooltip, see the buffered part behind the progress and use the
-  quick-jump markers; double-click the video halves to jump −10 s / +10 s.
-- ⏩ **Playback speed** from 0.5× to 2× and a **keyboard overview** (press `?`) — plus extra
-  shortcuts, including `0`–`9` to jump straight into the episode.
-- 🛠️ **Robust playback.** Seeks are clamped to the range the stream really allows and the progress
-  bar keeps working even when a stream reports no duration.
+- 🎞️ **Native MPV engine (optional).** BabyFlix can play through a real **MPV process** in its own
+  window: hardware decoding for every format **without re-encoding**, HDR tone mapping, frame-exact
+  seeking and all audio/subtitle tracks as your provider delivers them. Enable it in
+  **Settings → Playback → Playback engine** (default stays *Webview*).
+- 🎛️ **The BabyFlix window becomes the remote.** Full control for the MPV window: play/pause,
+  ±10 s, draggable timeline with preview, volume, mute, **0.5×–2× speed**, audio/subtitle tracks,
+  *always on top*, fullscreen and the end-of-episode card with **auto-next** — plus all keyboard
+  shortcuts (`Space`, `←`/`→`, `↑`/`↓`, `M`, `F`, `0`–`9`, `?`, `Esc`).
+- 🔍 **MPV check with install help.** Settings shows the detected MPV path — or the exact command
+  for your system (`sudo apt install mpv` · `brew install mpv` · `winget install mpv`); if MPV fails
+  to start, one click takes you back to the webview player.
 
 ## ✨ Highlights
 
 - 🎬 **Movies / Series / Live TV** with categories, search and sorting
 - 🔌 **Two login modes:** Xtream Codes and M3U playlist (fallback)
 - 🖼️ **Automatic posters** (panel + IMDb) and ⭐ **real IMDb ratings** — no API key
-- ▶️ **HLS player** with fullscreen, seeking, volume and keyboard shortcuts
+- ▶️ **HLS player** with fullscreen, seeking, volume and keyboard shortcuts — or the optional
+  native **MPV engine** (own window, hardware decoding, all tracks)
 - 📺 **Live TV** with channel logos and **EPG** (now / next)
 - 📚 **Series** with seasons/episodes and autoplay of the next episode
 - ⏱️ **Continue watching** and 🌍 **German / English** UI (switchable)

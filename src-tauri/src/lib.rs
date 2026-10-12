@@ -1,11 +1,14 @@
 mod imdb;
 mod m3u;
+mod mpv;
 mod proxy;
 mod ratings;
 mod remux;
 mod routes;
 mod state;
 mod xtream;
+
+use std::sync::Arc;
 
 use tauri::Manager;
 
@@ -57,12 +60,13 @@ pub fn run() {
                 boot_state.ensure_ratings();
             });
 
-            // Reap idle FFmpeg remux sessions.
+            // Reap idle FFmpeg remux sessions and an idle MPV process.
             let reap_state = state.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     reap_state.remux.reap();
+                    reap_state.mpv.reap();
                 }
             });
 
@@ -70,6 +74,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![api_base])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Never leave an orphaned MPV window behind.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<Arc<state::App>>() {
+                    state.mpv.stop();
+                }
+            }
+        });
 }

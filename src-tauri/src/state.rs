@@ -37,6 +37,7 @@ pub struct App {
     pub ratings_started: AtomicBool,
     pub locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub remux: crate::remux::Remux,
+    pub mpv: crate::mpv::Mpv,
 }
 
 impl App {
@@ -50,6 +51,7 @@ impl App {
             .expect("http client");
         let _ = std::fs::create_dir_all(&dir);
         let remux = crate::remux::Remux::new(dir.join("hls"));
+        let mpv = crate::mpv::Mpv::new(dir.clone());
         Arc::new(App {
             client,
             dir,
@@ -60,6 +62,7 @@ impl App {
             ratings_started: AtomicBool::new(false),
             locks: RwLock::new(HashMap::new()),
             remux,
+            mpv,
         })
     }
 

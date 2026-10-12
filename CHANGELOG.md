@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0] — 2026-10-12
+
+### Added
+- **Native MPV engine (optional).** BabyFlix can hand playback to a real **MPV process** instead of
+  the embedded webview player: hardware decoding for every format without re-encoding, HDR tone
+  mapping, frame-exact seeking and all audio/subtitle tracks exactly as the provider delivers them.
+  Switch in **Settings → Playback → Playback engine**; the default stays *Webview (default)*.
+- **MPV remote control.** MPV renders in its own window, the BabyFlix window becomes the remote:
+  play/pause, ±10 s, draggable timeline with scrub preview and time tooltip, volume, mute,
+  0.5×–2× speed, audio/subtitle track picker, *always on top*, fullscreen, the end-of-episode card
+  with auto-next and the full keyboard shortcut set — mirroring the webview player.
+- **MPV detection.** The backend reports the MPV binary it found (`/api/health`), and Settings shows
+  the path or an install hint (`sudo apt install mpv` · `brew install mpv` · `winget install mpv`).
+- If MPV fails to start, the overlay shows the reason and offers a one-click switch back to Webview.
+
+### Changed
+- Both engines now start from the same resolved stream URL (single `play_url` helper), so the
+  transcode fallback and provider limits apply identically.
+
+### Fixed
+- The end-card countdown no longer updates state while rendering (React warning); the automation
+  runs from its own timer and the episode switch happens in the tick.
+
 ## [1.3.0] — 2026-10-11
 
 ### Added

@@ -125,6 +125,8 @@ export interface HealthResponse {
   /** Path of the FFmpeg binary the backend uses, or null when it is missing. */
   ffmpeg?: string | null;
   ffprobe?: string | null;
+  /** Path of the MPV binary for the native playback engine, or null when missing. */
+  mpv?: string | null;
 }
 
 export interface DiagResult {
@@ -159,6 +161,42 @@ export interface StreamsResponse {
   video: StreamInfo[];
   subtitle: StreamInfo[];
   duration: number | null;
+}
+
+/** Zustand des nativen MPV-Prozesses (Engine "mpv"). */
+export interface MpvStatus {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  running: boolean;
+  props: Record<string, unknown>;
+  seq: number;
+}
+
+export interface MpvPoll {
+  seq: number;
+  /** true = der Client war zu langsam, das Event-Fenster ist gerissen (neu laden). */
+  reset: boolean;
+  running: boolean;
+  events: Record<string, unknown>[];
+  props: Record<string, unknown>;
+}
+
+export interface MpvStartOpts {
+  kind: Kind;
+  id: string;
+  ext?: string;
+  start?: number;
+  audio?: number;
+  sub?: number;
+  volume?: number;
+  muted?: boolean;
+  speed?: number;
+  fullscreen?: boolean;
+  ontop?: boolean;
+  title?: string;
+  alang?: string;
+  slang?: string;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -265,6 +303,21 @@ export const api = {
     if (ext) sp.set("ext", ext);
     return req<StreamsResponse>(`/api/streams?${sp.toString()}`);
   },
+
+  // --- native MPV engine (optional playback backend) ---
+  mpvStatus: () => req<MpvStatus>("/api/mpv/status"),
+  mpvPoll: (since: number) => req<MpvPoll>(`/api/mpv/poll?since=${since}`),
+  mpvStart: (o: MpvStartOpts) =>
+    req<{ ok: boolean; url: string; path: string | null }>("/api/mpv/start", {
+      method: "POST",
+      body: JSON.stringify(o),
+    }),
+  mpvCmd: (command: unknown[]) =>
+    req<{ ok: boolean }>("/api/mpv/cmd", {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+  mpvStop: () => req<{ ok: boolean }>("/api/mpv/stop", { method: "POST" }).catch(() => ({ ok: false })),
 };
 
 export function imgUrl(u: string | null | undefined): string | undefined {

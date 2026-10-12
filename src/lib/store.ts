@@ -71,6 +71,10 @@ interface AppStore {
   autoplayNext: boolean;
   setAutoplayNext: (v: boolean) => void;
 
+  /** Wiedergabe-Engine: "web" = hls.js im Webview, "mpv" = nativer MPV-Prozess. */
+  playerEngine: "web" | "mpv";
+  setPlayerEngine: (v: "web" | "mpv") => void;
+
   /** Remembered login, so the user stays signed in until the account is removed. */
   savedLogin: SavedLogin | null;
   setSavedLogin: (v: SavedLogin | null) => void;
@@ -107,6 +111,9 @@ export const useStore = create<AppStore>()(
       autoplayNext: true,
       setAutoplayNext: (v) => set({ autoplayNext: v }),
 
+      playerEngine: "web",
+      setPlayerEngine: (v) => set({ playerEngine: v }),
+
       savedLogin: null,
       setSavedLogin: (v) => set({ savedLogin: v }),
     }),
@@ -125,6 +132,7 @@ export const useStore = create<AppStore>()(
         favorites: s.favorites,
         autoplayNext: s.autoplayNext,
         autoResume: s.autoResume,
+        playerEngine: s.playerEngine,
         savedLogin: s.savedLogin,
       }),
     }
