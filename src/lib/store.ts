@@ -18,6 +18,9 @@ export interface PlayRequest {
  subtitle?: string;
  historyKey: string;
  next?: PlayNext;
+ /** Bei Serien: ID der Serie (nicht der Folge) - erlaubt dem Player, selbst die
+  *  nächste Folge nachzuladen und so endlos weiterzuspielen. */
+ seriesId?: string;
  /** Fortsetzen-Angebot: erst ab dieser Sekunde statt bei 0 starten. */
  startAt?: number;
  }
@@ -71,7 +74,8 @@ interface AppStore {
   autoplayNext: boolean;
   setAutoplayNext: (v: boolean) => void;
 
-  /** Wiedergabe-Engine: "web" = hls.js im Webview, "mpv" = nativer MPV-Prozess. */
+  /** Wiedergabe-Engine: "mpv" = native MPV-Engine (Hauptweg, im App-Fenster
+   *  eingebettet), "web" = hls.js-Webview als Rückfallebene ohne MPV. */
   playerEngine: "web" | "mpv";
   setPlayerEngine: (v: "web" | "mpv") => void;
 
@@ -111,7 +115,7 @@ export const useStore = create<AppStore>()(
       autoplayNext: true,
       setAutoplayNext: (v) => set({ autoplayNext: v }),
 
-      playerEngine: "web",
+      playerEngine: "mpv",
       setPlayerEngine: (v) => set({ playerEngine: v }),
 
       savedLogin: null,
@@ -119,11 +123,15 @@ export const useStore = create<AppStore>()(
     }),
     {
       name: "babyflix-store",
-      version: 2,
+      version: 3,
       migrate: (state, version) => {
         // v0/v1 stored favorites as a string[]; reset them to objects.
         if (version < 2) {
           return { ...(state as Record<string, unknown>), favorites: [] } as unknown as AppStore;
+        }
+        // v2 -> v3: MPV ist jetzt die Haupt-Engine (Video läuft im App-Fenster).
+        if (version < 3) {
+          return { ...(state as Record<string, unknown>), playerEngine: "mpv" } as unknown as AppStore;
         }
         return state as AppStore;
       },

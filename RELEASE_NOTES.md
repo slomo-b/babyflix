@@ -4,19 +4,25 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.4.0
+## 🆕 What's new in 1.5.0
 
-- 🎞️ **Native MPV engine (optional).** BabyFlix can play through a real **MPV process** in its own
-  window: hardware decoding for every format **without re-encoding**, HDR tone mapping, frame-exact
-  seeking and all audio/subtitle tracks as your provider delivers them. Enable it in
-  **Settings → Playback → Playback engine** (default stays *Webview*).
-- 🎛️ **The BabyFlix window becomes the remote.** Full control for the MPV window: play/pause,
-  ±10 s, draggable timeline with preview, volume, mute, **0.5×–2× speed**, audio/subtitle tracks,
-  *always on top*, fullscreen and the end-of-episode card with **auto-next** — plus all keyboard
-  shortcuts (`Space`, `←`/`→`, `↑`/`↓`, `M`, `F`, `0`–`9`, `?`, `Esc`).
-- 🔍 **MPV check with install help.** Settings shows the detected MPV path — or the exact command
-  for your system (`sudo apt install mpv` · `brew install mpv` · `winget install mpv`); if MPV fails
-  to start, one click takes you back to the webview player.
+- 🎬 **The native player now lives *inside* BabyFlix.** MPV renders directly into the app window
+  (real embedding), so movies and episodes play in **one window** — no second player, no focus
+  games, with hardware decoding and HDR tone mapping for every format and every audio track.
+- 🎛️ **All-new control layout around the video.** Poster/title header, a wide timeline with hover
+  preview and precise scrubbing, skip-back / play / skip-forward, volume slider, **0.5×–2× speed**,
+  audio and subtitle pickers, built-in keyboard help, always-on-top and fullscreen. Menus open
+  beside the picture instead of behind it, so they are always readable.
+- ⏭️ **Auto-next, everywhere.** At the end of an episode the card finds the following one from the
+  series itself, counts down 10 seconds and can be re-armed, replayed or stopped at any time.
+- 💾 **Playback preferences stick.** Volume, speed, mute and always-on-top are remembered —
+  reset them any time from the shortcut popover.
+- 🖥️ **Runs everywhere.** X11 and Windows get true embedding; on macOS and Wayland MPV runs in a
+  borderless, always-on-top window docked exactly over the video area. Without MPV installed the
+  webview player takes over automatically.
+- ⌨️ **Keyboard first:** `Space`/`K` pause · `←`/`→` ±5 s (with `Shift` 30 s) · `J`/`L` ±10 s ·
+  `↑`/`↓` volume · `M` mute · `F` fullscreen · `T` on top · `H` header · `N` next · `0`–`9`
+  jump to tenths · `Esc` close.
 
 ## ✨ Highlights
 

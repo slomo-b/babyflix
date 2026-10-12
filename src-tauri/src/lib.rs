@@ -1,3 +1,4 @@
+mod embed;
 mod imdb;
 mod m3u;
 mod mpv;
@@ -19,6 +20,14 @@ fn api_base() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The embedded video surface needs a native window id; on Linux that means
+    // X11 (`mpv --wid`), so a Wayland session is served through XWayland. Set
+    // GDK_BACKEND=wayland to opt out - then MPV docks its own window instead.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_BACKEND").is_none() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -29,6 +38,22 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let state = state::App::new(dir);
+
+            // Native video surface: hand the window's raw handle to the MPV
+            // engine so it can paint into a child window of the app.
+            if let Some(window) = app.get_webview_window("main") {
+                let host = crate::embed::host_handle(&window);
+                match &host {
+                    Some(h) => eprintln!(
+                        "[babyflix] embed host {:?} {:#x}",
+                        h.kind, h.native
+                    ),
+                    None => eprintln!(
+                        "[babyflix] no native window handle - MPV will use its own window"
+                    ),
+                }
+                state.set_host(window, host);
+            }
 
             // Start the local HTTP API (streaming proxy + catalog + metadata).
             let api_state = state.clone();
@@ -72,6 +97,24 @@ pub fn run() {
 
             app.manage(state);
             Ok(())
+        })
+        // Keep the embedded video glued to the stage rectangle while the user
+        // moves/resizes the window (and mirror focus for docked MPV windows).
+        .on_window_event(|window, event| {
+            use tauri::WindowEvent;
+            let handle = window.app_handle();
+            let Some(state) = handle.try_state::<Arc<state::App>>() else {
+                return;
+            };
+            match event {
+                WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. } => {
+                    state.restage(window.is_focused().unwrap_or(true));
+                }
+                WindowEvent::Focused(on) => state.restage(*on),
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![api_base])
         .build(tauri::generate_context!())

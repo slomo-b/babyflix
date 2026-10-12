@@ -164,6 +164,14 @@ export interface StreamsResponse {
 }
 
 /** Zustand des nativen MPV-Prozesses (Engine "mpv"). */
+export interface MpvEmbed {
+  /** "child-window" = Video läuft im eigenen Child-Window der App, "own-window" = eigenes Fenster. */
+  mode: "child-window" | "own-window" | null;
+  wid: number | null;
+  rect: { x: number; y: number; w: number; h: number };
+  visible: boolean;
+}
+
 export interface MpvStatus {
   available: boolean;
   path: string | null;
@@ -171,6 +179,7 @@ export interface MpvStatus {
   running: boolean;
   props: Record<string, unknown>;
   seq: number;
+  embed?: MpvEmbed;
 }
 
 export interface MpvPoll {
@@ -318,6 +327,16 @@ export const api = {
       body: JSON.stringify({ command }),
     }),
   mpvStop: () => req<{ ok: boolean }>("/api/mpv/stop", { method: "POST" }).catch(() => ({ ok: false })),
+  /**
+   * Meldet dem Backend, wo das Video liegen soll (physische Pixel, relativ zum
+   * Client-Bereich des Fensters). Die native Video-Fläche wird dorthin
+   * verschoben/skaliert bzw. (ohne Child-Windows) dort angedockt.
+   */
+  mpvStage: (r: { x: number; y: number; w: number; h: number; visible: boolean }) =>
+    req<{ ok: boolean; embed: MpvEmbed }>("/api/mpv/stage", {
+      method: "POST",
+      body: JSON.stringify(r),
+    }),
 };
 
 export function imgUrl(u: string | null | undefined): string | undefined {

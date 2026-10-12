@@ -161,6 +161,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
       poster: ep.cover ?? item.cover ?? undefined,
       subtitle: `S${ep.season} · E${ep.num} – ${ep.title}`,
       historyKey: `series:${ep.id}`,
+      seriesId: item.id,
       startAt,
       next: next
         ? {

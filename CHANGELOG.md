@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.5.0] — 2026-10-12
+
+### Changed
+- **MPV is now the default playback engine and renders inside the BabyFlix window** (`mpv --wid`):
+  one window, no second player to manage, focus stays where you expect it. Fresh installs and
+  existing profiles (store migration v3) both start in MPV; the webview player remains as the
+  automatic fallback when MPV is not installed.
+- **New player chrome** (replaces the old overlay). An HTML overlay can never sit on top of a
+  native surface — the video would always cover it — so the controls now live in a real header and
+  transport bar *around* the video stage: poster + title header with an engine badge, fullscreen
+  and close, a wide timeline with hover preview and second-precision scrubbing, and a footer with
+  skip-back / play / skip-forward, volume slider, speed menu, audio and subtitle pickers, keyboard
+  help, always-on-top and fullscreen.
+- End-of-episode card reworked for the native engine: the next episode is resolved from the series
+  itself (no pre-computed hint needed), 10 s countdown, *Play now*, *Replay*, *Stop auto-play*, and
+  the countdown resets per session.
+- Playback preferences (volume, speed, muted, always-on-top) persist across sessions via
+  `localStorage`; *Reset playback settings* in the shortcut popover restores the defaults.
+- Menus stay readable above the native surface: while a popover is open the stage reports a
+  narrower rectangle (measured against the popover) so MPV's video is never drawn over it. The
+  picture widens back the moment the menu closes, and `H` gives the same space back to the video.
+- The end-of-episode card knows the difference between an episode and a live stream: a dropped
+  live channel shows *Stream ended* instead of *Episode finished*.
+
+### Added
+- `POST /api/mpv/stage` — the UI reports the video rectangle in device pixels and its visibility;
+  the backend creates/repositions the native surface, keeps it hidden until playback actually
+  starts and follows window move/resize/scale-factor changes.
+- Own-window fallback for platforms without native child windows (macOS, Wayland): MPV runs
+  borderless and always-on-top, docked onto the stage rectangle via `--geometry`, with a header
+  hint that the video lives in its own window.
+- Linux: `GDK_BACKEND=x11` is set automatically so Wayland sessions get XWayland and real embedding
+  (opt out with `GDK_BACKEND=wayland`). `BABYFLIX_MPV_EMBED=0` disables embedding entirely and
+  restores MPV's own OSC.
+- New shortcuts for the shell: `H` toggles the chrome, `T` always-on-top, `N` next episode,
+  `,` / `.` speed, `0`–`9` jump to the tenths, `Shift` + arrows skip 30 s.
+
+### Fixed
+- Timeline scrubbing no longer fights the 250 ms polling loop (local scrub state while dragging,
+  seek on release); the hover tooltip shows the exact target time.
+- The native surface is destroyed together with the MPV process — no orphan window stays behind
+  after closing the player.
+
 ## [1.4.0] — 2026-10-12
 
 ### Added

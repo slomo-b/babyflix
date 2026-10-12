@@ -3,8 +3,10 @@
 //! Why an external process (and not libmpv in-process): MPV decodes every container
 //! and codec with hardware support, tone-maps HDR, buffers IPTV streams and seeks
 //! frame-exact - things a webview `<video>` element can only do after a re-encode.
-//! Embedding libmpv into the Tauri window (`--wid`) is per-OS fragile, so the video
-//! lives in MPV's own window while the webview stays the control surface.
+//! Stufe 3 embeds that process into the app window: we own a native child window
+//! (`embed::Stage`) and hand its id to `mpv --wid=<id>`, so the video is painted
+//! *inside* BabyFlix. Where no child window exists (macOS, Wayland) MPV runs in
+//! its own borderless window which we dock over the stage rectangle.
 //!
 //! Layout: `Mpv` owns a long-lived `mpv --idle` child. A reader thread parses the
 //! JSON IPC stream into a property snapshot plus a ring buffer of events that the UI
@@ -21,6 +23,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::embed::{self, Mode, Rect};
 use crate::remux::{find_exe, hidden};
 
 /// How many events the UI may fall behind.
@@ -186,6 +189,19 @@ pub struct Mpv {
     ver: RwLock<Option<String>>,
     proc: Mutex<Option<Proc>>,
     shared: Arc<Shared>,
+    /// Host window handle + the native surface the video is painted into.
+    stage: Mutex<StageState>,
+}
+
+/// Embedded-video state. `rect` is what the UI last asked for (physical px,
+/// relative to the client area); `origin` is that area's position on screen.
+#[derive(Default)]
+pub struct StageState {
+    pub host: Option<embed::Host>,
+    pub stage: Option<embed::Stage>,
+    pub rect: Rect,
+    pub origin: (i32, i32),
+    pub visible: bool,
 }
 
 impl Mpv {
@@ -197,6 +213,7 @@ impl Mpv {
             ver: RwLock::new(None),
             proc: Mutex::new(None),
             shared: Arc::new(Shared::new()),
+            stage: Mutex::new(StageState::default()),
         }
     }
 
@@ -272,6 +289,7 @@ impl Mpv {
             "running": self.running(),
             "props": self.props(),
             "seq": self.shared.seq.load(Ordering::SeqCst),
+            "embed": self.embed_info(),
         })
     }
 
@@ -315,6 +333,69 @@ impl Mpv {
         self.command(&[json!("set_property"), json!(name), value])
     }
 
+    /// Remember the app window's native handle (called once at startup).
+    pub fn set_host(&self, host: Option<embed::Host>) {
+        self.stage.lock().unwrap().host = host;
+    }
+
+    /// Which embedding mode is in use (`None` = no surface reserved yet).
+    pub fn embed_mode(&self) -> Option<Mode> {
+        self.stage.lock().unwrap().stage.as_ref().map(|s| s.mode())
+    }
+
+    /// Embedding state for `/api/health` and `/api/mpv/status`.
+    pub fn embed_info(&self) -> Value {
+        let st = self.stage.lock().unwrap();
+        json!({
+            "mode": st.stage.as_ref().map(|s| s.mode().as_str()),
+            "wid": st.stage.as_ref().and_then(|s| s.wid()),
+            "rect": st.rect,
+            "visible": st.visible,
+        })
+    }
+
+    /// Last rectangle + visibility the UI asked for.
+    pub fn stage_rect(&self) -> (Rect, bool) {
+        let st = self.stage.lock().unwrap();
+        (st.rect, st.visible)
+    }
+
+    /// Place (and show/hide) the video surface. `client` is relative to the
+    /// window's client area, `origin` is that area's position on screen.
+    pub fn set_stage(&self, client: Rect, origin: (i32, i32), visible: bool) {
+        let (mode, wid) = {
+            let mut st = self.stage.lock().unwrap();
+            st.rect = client.sized();
+            st.origin = origin;
+            st.visible = visible;
+            if let Some(s) = st.stage.as_mut() {
+                s.set_rect(client);
+                s.set_visible(visible);
+                s.sink();
+            }
+            (st.stage.as_ref().map(|s| s.mode()), st.stage.as_ref().and_then(|s| s.wid()))
+        };
+        // No native child window (macOS, Wayland): MPV keeps its own borderless
+        // window, so the surface is placed with screen geometry instead.
+        if mode == Some(Mode::OwnWindow) && wid.is_none() {
+            let screen = Rect {
+                x: origin.0 + client.x,
+                y: origin.1 + client.y,
+                ..client.sized()
+            };
+            let _ = self.set_prop("geometry", json!(embed::geometry_arg(screen)));
+            let _ = self.set_prop("window-minimized", json!(if visible { "no" } else { "yes" }));
+        }
+    }
+
+    /// Mirror the app window's focus in own-window mode - MPV's window would
+    /// otherwise stay above every other application.
+    pub fn set_ontop(&self, on: bool) {
+        if self.embed_mode() == Some(Mode::OwnWindow) {
+            let _ = self.set_prop("ontop", json!(on));
+        }
+    }
+
     fn spawn(&self, o: &StartOpts) -> Result<()> {
         let bin = self
             .resolve()
@@ -342,6 +423,34 @@ impl Mpv {
             .clone()
             .unwrap_or_else(|| "de,ger,en,eng,off".to_string());
 
+        // Reserve the native video surface *before* MPV starts - child-window
+        // mode needs its id on the command line (`--wid`).
+        let embed_on = std::env::var("BABYFLIX_MPV_EMBED")
+            .map(|v| !v.trim().is_empty() && v.trim() != "0")
+            .unwrap_or(true);
+        let mut wid: Option<u64> = None;
+        let mut own_window = false;
+        {
+            let mut st = self.stage.lock().unwrap();
+            if let Some(mut old) = st.stage.take() {
+                old.destroy();
+            }
+            if embed_on {
+                let stage = embed::Stage::create(st.host, st.rect);
+                own_window = st.host.is_some() && stage.mode() == Mode::OwnWindow;
+                wid = stage.wid();
+                st.stage = Some(stage);
+            }
+        }
+        let dock = {
+            let st = self.stage.lock().unwrap();
+            Rect {
+                x: st.origin.0 + st.rect.x,
+                y: st.origin.1 + st.rect.y,
+                ..st.rect.sized()
+            }
+        };
+
         let mut cmd = Command::new(&bin);
         cmd.arg("--idle=yes")
             .arg("--no-terminal")
@@ -349,7 +458,6 @@ impl Mpv {
             .arg("--keep-open=yes")
             .arg("--save-position-on-quit=no")
             .arg(format!("--input-ipc-server={sock}"))
-            .arg("--osc=yes")
             .arg("--osd-level=1")
             .arg(format!("--hwdec={hwdec}"))
             .arg(format!("--vo={vo}"))
@@ -361,6 +469,24 @@ impl Mpv {
             .arg(format!("--slang={slang}"))
             .arg("--title=BabyFlix")
             .arg("--cache=yes");
+        if let Some(w) = wid {
+            // Video is painted into our own child window: no border, no OSC (the
+            // HTML chrome around the stage is the control surface).
+            cmd.arg(format!("--wid={w}"))
+                .arg("--border=no")
+                .arg("--focus-on-open=no")
+                .arg("--osc=no");
+        } else if own_window {
+            // No native child windows here: MPV floats in its own borderless
+            // window, docked over the stage rectangle by /api/mpv/stage.
+            cmd.arg("--border=no")
+                .arg("--ontop=yes")
+                .arg("--focus-on-open=no")
+                .arg("--osc=no")
+                .arg(format!("--geometry={}", embed::geometry_arg(dock)));
+        } else {
+            cmd.arg("--osc=yes");
+        }
         if o.muted == Some(true) {
             cmd.arg("--mute=yes");
         }
@@ -531,6 +657,14 @@ impl Mpv {
             {
                 let _ = std::fs::remove_file(&proc.socket);
             }
+        }
+        // Release the native video surface together with the process.
+        {
+            let mut st = self.stage.lock().unwrap();
+            if let Some(mut s) = st.stage.take() {
+                s.destroy();
+            }
+            st.visible = false;
         }
         *self.shared.props.lock().unwrap() = json!({});
     }

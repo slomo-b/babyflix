@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
 
+use crate::embed;
 use crate::m3u;
 use crate::proxy;
 use crate::state::{App, Config};
@@ -67,6 +68,7 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "ffmpeg": app.remux.ffmpeg_path(),
         "ffprobe": app.remux.ffprobe_path(),
         "mpv": app.mpv.path(),
+        "mpv_embed": app.mpv.embed_info(),
     }))
 }
 
@@ -642,6 +644,36 @@ async fn mpv_stop(State(app): State<Arc<App>>) -> Json<Value> {
     Json(json!({ "ok": true }))
 }
 
+#[derive(Deserialize)]
+struct MpvStageReq {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    #[serde(default = "yes")]
+    visible: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The UI reports the rectangle the video should occupy (physical pixels of the
+/// webview's client area). The native surface is moved/resized to match - or, on
+/// platforms without child windows, MPV's own window is docked there.
+async fn mpv_stage(State(app): State<Arc<App>>, Json(q): Json<MpvStageReq>) -> Json<Value> {
+    app.apply_stage(
+        embed::Rect {
+            x: q.x,
+            y: q.y,
+            w: q.w,
+            h: q.h,
+        },
+        q.visible,
+    );
+    Json(json!({ "ok": true, "embed": app.mpv.embed_info() }))
+}
+
 
 #[derive(Deserialize)]
 struct UrlQ {
@@ -854,6 +886,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/mpv/cmd", post(mpv_cmd))
         .route("/api/mpv/poll", get(mpv_poll))
         .route("/api/mpv/stop", post(mpv_stop))
+        .route("/api/mpv/stage", post(mpv_stage))
         .route("/api/streams", get(streams))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
@@ -988,6 +1021,62 @@ mod mpv_http_tests {
             .unwrap();
         assert_eq!(status["available"], json!(true), "status: {status}");
         assert_eq!(status["running"], json!(false), "status: {status}");
+
+        // The UI reports the video rectangle it reserved; without an app window
+        // there is no native surface yet, but the contract (rect + visibility)
+        // must hold end to end.
+        let staged: Value = http
+            .post(format!("{base}/api/mpv/stage"))
+            .json(&json!({ "x": 12, "y": 34, "w": 640, "h": 360, "visible": true }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(staged["ok"], json!(true), "stage: {staged}");
+        assert_eq!(
+            staged["embed"]["rect"],
+            json!({ "x": 12, "y": 34, "w": 640, "h": 360 }),
+            "stage: {staged}"
+        );
+        assert_eq!(staged["embed"]["visible"], json!(true), "stage: {staged}");
+        assert!(staged["embed"]["mode"].is_null(), "stage: {staged}");
+        let health: Value = http
+            .get(format!("{base}/api/health"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            health["mpv_embed"]["rect"],
+            json!({ "x": 12, "y": 34, "w": 640, "h": 360 }),
+            "health: {health}"
+        );
+        // A degenerate rectangle is clamped and visibility can be turned off.
+        let tiny: Value = http
+            .post(format!("{base}/api/mpv/stage"))
+            .json(&json!({ "x": 0, "y": 0, "w": 1, "h": 0, "visible": false }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(tiny["embed"]["rect"]["w"], json!(2), "tiny: {tiny}");
+        assert_eq!(tiny["embed"]["visible"], json!(false), "tiny: {tiny}");
+        // Restore the rectangle the UI would use while playing.
+        let _: Value = http
+            .post(format!("{base}/api/mpv/stage"))
+            .json(&json!({ "x": 0, "y": 0, "w": 1280, "h": 720 }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
 
         let started: Value = http
             .post(format!("{base}/api/mpv/start"))

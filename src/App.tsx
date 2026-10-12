@@ -8,7 +8,7 @@ import { useUpdater } from "./lib/updater";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Player } from "./components/Player";
-import { MpvPlayer } from "./components/MpvPlayer";
+import { PlayerShell } from "./components/PlayerShell";
 import { UpdateBanner } from "./components/UpdateBanner";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
@@ -34,6 +34,7 @@ function Splash() {
 
 export default function App() {
   const qc = useQueryClient();
+  const t = useT();
   const engine = useStore((s) => s.playerEngine);
   const session = useQuery({ queryKey: ["session"], queryFn: api.session, staleTime: 5000 });
   const health = useQuery({
@@ -91,7 +92,13 @@ export default function App() {
           </Routes>
         </div>
       </main>
-      {engine === "mpv" ? <MpvPlayer /> : <Player />}
+      {/* Native MPV-Engine (Standard) - ohne installiertes MPV greift der Webview-Player. */}
+      {engine === "mpv" && health.data?.mpv ? <PlayerShell /> : <Player />}
+      {engine === "mpv" && health.data && !health.data.mpv ? (
+        <div className="pointer-events-none fixed bottom-3 left-1/2 z-40 -translate-x-1/2 rounded-full border border-amber-500/40 bg-black/85 px-3 py-1.5 text-xs text-amber-300">
+          {t("settings.engineMpvMissing")}
+        </div>
+      ) : null}
       <UpdateBanner />
     </div>
   );
