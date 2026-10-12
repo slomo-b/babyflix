@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1] — 2026-10-12
+
+### Fixed
+- Windows build: `RawWindowHandle::Xlib`'s window id is a 32-bit `c_ulong` there, so the
+  host-handle match arms produced different integer widths. All arms now cast to `u64`.
+  Linux and macOS were unaffected.
+
 ## [1.5.0] — 2026-10-12
 
 ### Changed

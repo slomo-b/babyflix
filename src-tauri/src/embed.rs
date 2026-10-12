@@ -82,7 +82,9 @@ pub fn host_handle<W: raw_window_handle::HasWindowHandle>(w: &W) -> Option<Host>
     use raw_window_handle::RawWindowHandle;
     let handle = w.window_handle().ok()?;
     let (kind, native) = match handle.as_raw() {
-        RawWindowHandle::Xlib(h) => (HostKind::Xlib, h.window),
+        // `Xlib`'s window is `c_ulong` – 32-bit on Windows, 64-bit elsewhere –
+        // so cast every arm to u64 to keep the tuple type stable.
+        RawWindowHandle::Xlib(h) => (HostKind::Xlib, h.window as u64),
         RawWindowHandle::Xcb(h) => (HostKind::Xcb, h.window.get() as u64),
         RawWindowHandle::Win32(h) => (HostKind::Win32, h.hwnd.get() as u64),
         RawWindowHandle::AppKit(_) => (HostKind::AppKit, 0),
@@ -293,7 +295,6 @@ mod imp {
     const WS_CHILD: u32 = 0x4000_0000;
     const WS_VISIBLE: u32 = 0x1000_0000;
     const WS_CLIPSIBLINGS: u32 = 0x0400_0000;
-    const WS_CLIPCHILDREN: u32 = 0x0200_0000;
     const SW_SHOWNOACTIVATE: i32 = 4;
     const SW_HIDE: i32 = 0;
     const HWND_BOTTOM: Hwnd = 1;

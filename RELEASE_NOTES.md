@@ -4,7 +4,7 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.5.0
+## 🆕 What's new in 1.5.1
 
 - 🎬 **The native player now lives *inside* BabyFlix.** MPV renders directly into the app window
   (real embedding), so movies and episodes play in **one window** — no second player, no focus

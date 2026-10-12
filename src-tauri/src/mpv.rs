@@ -160,6 +160,8 @@ impl Shared {
 
 struct Proc {
     child: Child,
+    /// IPC endpoint – a unix socket on Linux/macOS, unused on Windows (named pipe).
+    #[cfg_attr(windows, allow(dead_code))]
     socket: String,
     tx: Sender<Value>,
     stop: Arc<AtomicBool>,
