@@ -32,6 +32,9 @@ const EVENT_RING: usize = 600;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 /// `time-pos` changes ~20x/s; the UI only needs a few updates per second.
 const POS_THROTTLE: Duration = Duration::from_millis(200);
+/// How long MPV gets to open its IPC endpoint. Generous: a cold first start on
+/// macOS (Gatekeeper, spinning disk) is slower than on Linux.
+const IPC_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Properties mirrored into the UI (observed on connect).
 const OBSERVED: [&str; 17] = [
@@ -78,6 +81,49 @@ fn socket_path(dir: &Path) -> String {
 #[cfg(windows)]
 fn socket_path(_dir: &Path) -> String {
     format!(r"\\.\pipe\babyflix-mpv-{}", std::process::id())
+}
+
+/// Wait for MPV's IPC endpoint to appear. The `Err` carries *why* we gave up:
+/// "mpv exited during startup" (bad option, blocked binary) and "mpv runs but
+/// never opened the socket" (socket path refused) need different fixes, and
+/// without this they are the same opaque failure for the user.
+fn wait_for_ipc(child: &mut Child, sock: &str, timeout: Duration) -> Result<Ipc, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(stream) = connect(sock) {
+            return Ok(stream);
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("mpv exited during startup: {status}"));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "no IPC endpoint after {}s while mpv kept running",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Where MPV writes its own log (also quoted in start errors).
+fn log_file_path(dir: &Path) -> PathBuf {
+    dir.join("mpv.log")
+}
+
+/// Last `max` characters of MPV's own log (empty when it never wrote one).
+/// One line, so it survives an error dialog and a screenshot.
+fn log_tail(path: &Path, max: usize) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return String::new();
+    }
+    let skip = text.chars().count().saturating_sub(max);
+    text.chars()
+        .skip(skip)
+        .collect::<String>()
+        .replace(['\r', '\n'], " | ")
 }
 
 fn mpv_file_name() -> &'static str {
@@ -242,6 +288,11 @@ impl Mpv {
         self.resolve().map(|p| p.to_string_lossy().into_owned())
     }
 
+    /// Path of MPV's own log file (diagnostics; see `/api/health`).
+    pub fn log_path(&self) -> String {
+        log_file_path(&self.dir).to_string_lossy().into_owned()
+    }
+
     pub fn available(&self) -> bool {
         self.resolve().is_some()
     }
@@ -403,10 +454,20 @@ impl Mpv {
             .resolve()
             .ok_or_else(|| anyhow!("mpv not found - install mpv or set BABYFLIX_MPV"))?;
         let sock = socket_path(&self.dir);
-        #[cfg(unix)]
-        {
-            let _ = std::fs::remove_file(&sock);
-        }
+
+        // MPV writes its own log: stdout/stderr are /dev/null, and without this
+        // a failed start on a user's machine is a black box. The path also goes
+        // into the error message, so a screenshot carries the real reason.
+        let log_path = log_file_path(&self.dir);
+        let _ = std::fs::remove_file(&log_path);
+
+        // Escape hatch for a machine whose first MPV launch is slow (Gatekeeper
+        // checks the binary on first run): no rebuild needed to test a longer wait.
+        let ipc_timeout = std::env::var("BABYFLIX_MPV_IPC_TIMEOUT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(IPC_TIMEOUT);
 
         let env_or = |key: &str, default: &str| -> String {
             std::env::var(key).ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| default.to_string())
@@ -453,80 +514,119 @@ impl Mpv {
             }
         };
 
-        let mut cmd = Command::new(&bin);
-        cmd.arg("--idle=yes")
-            .arg("--no-terminal")
-            .arg("--force-window=yes")
-            .arg("--keep-open=yes")
-            .arg("--save-position-on-quit=no")
-            .arg(format!("--input-ipc-server={sock}"))
-            .arg("--osd-level=1")
-            .arg(format!("--hwdec={hwdec}"))
-            .arg(format!("--vo={vo}"))
-            .arg(format!("--cache-secs=30"))
-            .arg(format!("--demuxer-max-bytes={}", 256 * 1024 * 1024))
-            .arg(format!("--volume={volume}"))
-            .arg(format!("--speed={speed}"))
-            .arg(format!("--alang={alang}"))
-            .arg(format!("--slang={slang}"))
-            .arg("--title=BabyFlix")
-            .arg("--cache=yes");
-        if let Some(w) = wid {
-            // Video is painted into our own child window: no border, no OSC (the
-            // HTML chrome around the stage is the control surface).
-            cmd.arg(format!("--wid={w}"))
-                .arg("--border=no")
-                .arg("--focus-on-open=no")
-                .arg("--osc=no");
-        } else if own_window {
-            // No native child windows here: MPV floats in its own borderless
-            // window, docked over the stage rectangle by /api/mpv/stage.
-            cmd.arg("--border=no")
-                .arg("--ontop=yes")
-                .arg("--focus-on-open=no")
-                .arg("--osc=no")
-                .arg(format!("--geometry={}", embed::geometry_arg(dock)));
-        } else {
-            cmd.arg("--osc=yes");
-        }
-        if o.muted == Some(true) {
-            cmd.arg("--mute=yes");
-        }
-        if !profile.is_empty() && profile != "none" {
-            cmd.arg(format!("--profile={profile}"));
-        }
-        if let Some(ua) = &o.user_agent {
-            cmd.arg(format!("--user-agent={ua}"));
-        }
-        if let Ok(extra) = std::env::var("BABYFLIX_MPV_EXTRA") {
-            for part in extra.split_whitespace() {
-                cmd.arg(part);
+        // Every argument except `--input-ipc-server` - that one is per attempt.
+        let add_args = |cmd: &mut Command, sock: &str| {
+            cmd.arg("--idle=yes")
+                .arg("--no-terminal")
+                .arg("--force-window=yes")
+                .arg("--keep-open=yes")
+                .arg("--save-position-on-quit=no")
+                .arg(format!("--input-ipc-server={sock}"))
+                .arg("--osd-level=1")
+                .arg(format!("--hwdec={hwdec}"))
+                .arg(format!("--vo={vo}"))
+                .arg("--cache-secs=30")
+                .arg(format!("--demuxer-max-bytes={}", 256 * 1024 * 1024))
+                .arg(format!("--volume={volume}"))
+                .arg(format!("--speed={speed}"))
+                .arg(format!("--alang={alang}"))
+                .arg(format!("--slang={slang}"))
+                .arg("--title=BabyFlix")
+                .arg("--cache=yes")
+                .arg(format!("--log-file={}", log_path.display()));
+            if let Some(w) = wid {
+                // Video is painted into our own child window: no border, no OSC (the
+                // HTML chrome around the stage is the control surface).
+                cmd.arg(format!("--wid={w}"))
+                    .arg("--border=no")
+                    .arg("--focus-on-open=no")
+                    .arg("--osc=no");
+            } else if own_window {
+                // No native child windows here: MPV floats in its own borderless
+                // window, docked over the stage rectangle by /api/mpv/stage.
+                cmd.arg("--border=no")
+                    .arg("--ontop=yes")
+                    .arg("--focus-on-open=no")
+                    .arg("--osc=no")
+                    .arg(format!("--geometry={}", embed::geometry_arg(dock)));
+            } else {
+                cmd.arg("--osc=yes");
+            }
+            if o.muted == Some(true) {
+                cmd.arg("--mute=yes");
+            }
+            if !profile.is_empty() && profile != "none" {
+                cmd.arg(format!("--profile={profile}"));
+            }
+            if let Some(ua) = &o.user_agent {
+                cmd.arg(format!("--user-agent={ua}"));
+            }
+            if let Ok(extra) = std::env::var("BABYFLIX_MPV_EXTRA") {
+                for part in extra.split_whitespace() {
+                    cmd.arg(part);
+                }
+            }
+            cmd.stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            hidden(cmd);
+        };
+
+        // Two IPC candidates. macOS caps a socket path at 104 bytes and a data
+        // directory can be refused for other reasons; the temp dir path is short,
+        // ASCII and always writable. A second path only helps while MPV lives -
+        // if MPV died on startup the log explains why and a retry is pointless.
+        let mut sockets: Vec<String> = vec![sock];
+        #[cfg(unix)]
+        {
+            let alt = std::env::temp_dir().join(format!("babyflix-mpv-{}.sock", std::process::id()));
+            let alt = alt.to_string_lossy().into_owned();
+            if alt != sockets[0] {
+                sockets.push(alt);
             }
         }
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        hidden(&mut cmd);
 
-        let child = cmd.spawn().map_err(|e| anyhow!("mpv could not start: {e}"))?;
-
-        // MPV needs a moment to create its IPC endpoint.
-        let mut conn: Option<Ipc> = None;
-        for _ in 0..120 {
-            match connect(&sock) {
-                Ok(c) => {
-                    conn = Some(c);
+        let mut attempt_why = String::from("mpv never opened its IPC endpoint");
+        let mut started: Option<(Child, Ipc, String)> = None;
+        for (i, candidate) in sockets.into_iter().enumerate() {
+            #[cfg(unix)]
+            let _ = std::fs::remove_file(&candidate);
+            let mut cmd = Command::new(&bin);
+            add_args(&mut cmd, &candidate);
+            let mut c = cmd.spawn().map_err(|e| anyhow!("mpv could not start: {e}"))?;
+            // First candidate gets the full cold-start budget; the fallback path
+            // only has to prove itself quickly, so a hard failure stays readable.
+            let budget = if i == 0 { ipc_timeout } else { Duration::from_secs(5) };
+            match wait_for_ipc(&mut c, &candidate, budget) {
+                Ok(conn) => {
+                    started = Some((c, conn, candidate));
                     break;
                 }
-                Err(_) => std::thread::sleep(Duration::from_millis(50)),
+                Err(why) => {
+                    let exited = matches!(c.try_wait(), Ok(Some(_)));
+                    let _ = c.kill();
+                    let _ = c.wait();
+                    attempt_why = why;
+                    if exited {
+                        break;
+                    }
+                }
             }
         }
-        let conn = match conn {
-            Some(c) => c,
+        let (child, conn, used_sock) = match started {
+            Some(t) => t,
             None => {
-                let mut child = child;
-                let _ = child.kill();
-                return Err(anyhow!("mpv IPC endpoint was not reachable"));
+                let mut msg = format!("mpv IPC endpoint was not reachable ({attempt_why})");
+                msg.push_str(&format!(
+                    "\nbinary: {} [{}]",
+                    bin.display(),
+                    self.version().unwrap_or_else(|| "version unknown".into())
+                ));
+                let tail = log_tail(&log_path, 400);
+                if !tail.is_empty() {
+                    msg.push_str(&format!("\nlog {}: {tail}", log_path.display()));
+                }
+                return Err(anyhow!(msg));
             }
         };
         let write_half = conn
@@ -553,7 +653,7 @@ impl Mpv {
         }
         *self.proc.lock().unwrap() = Some(Proc {
             child,
-            socket: sock,
+            socket: used_sock,
             tx: tx.clone(),
             stop,
             threads: vec![reader, writer],
@@ -773,6 +873,31 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+    }
+
+    /// A failed start must name the reason: that text is what the user sees in
+    /// the dialog, and it is the difference between "MPV could not start" and a
+    /// fixable bug report.
+    #[cfg(unix)]
+    #[test]
+    fn ipc_wait_names_the_reason_it_gave_up() {
+        let socket = std::env::temp_dir().join("babyflix-ipc-nowhere.sock");
+        let socket = socket.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&socket);
+
+        // Nobody serves the socket, but the process lives on -> timeout.
+        let mut alive = Command::new("/bin/sleep").arg("5").spawn().expect("sleep");
+        let why = wait_for_ipc(&mut alive, &socket, Duration::from_millis(300)).unwrap_err();
+        let _ = alive.kill();
+        let _ = alive.wait();
+        assert!(why.contains("no IPC endpoint after"), "unerwartet: {why}");
+
+        // The process dies on startup (bad option, blocked binary) -> exit status,
+        // not a timeout: the two causes need different fixes.
+        let mut dead = Command::new("/bin/false").spawn().expect("false");
+        let why = wait_for_ipc(&mut dead, &socket, Duration::from_secs(5)).unwrap_err();
+        let _ = dead.wait();
+        assert!(why.contains("exited during startup"), "unerwartet: {why}");
     }
 
     #[test]

@@ -4,8 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
-## 🆕 What's new in 1.5.1
+## 🆕 What's new in 1.5.2
 
+- 🩺 **MPV start-up is fixed *and* self-explaining.** The wait for MPV's control socket was too
+  short for a cold first start on macOS (Homebrew's mpv, checked by Gatekeeper the first time) —
+  it is now 15 s, with a second attempt on a short temp socket and an escape hatch
+  (`BABYFLIX_MPV_IPC_TIMEOUT`, in seconds) for slow machines. If MPV still will not come up, the
+  dialog now tells you exactly **why**: whether MPV *died* during startup (with its exit status)
+  or *kept running* without opening the socket — plus the binary, its version and the last lines
+  of `mpv.log`. One screenshot pinpoints the cause.
 - 🎬 **The native player now lives *inside* BabyFlix.** MPV renders directly into the app window
   (real embedding), so movies and episodes play in **one window** — no second player, no focus
   games, with hardware decoding and HDR tone mapping for every format and every audio track.

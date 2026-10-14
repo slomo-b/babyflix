@@ -68,6 +68,8 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "ffmpeg": app.remux.ffmpeg_path(),
         "ffprobe": app.remux.ffprobe_path(),
         "mpv": app.mpv.path(),
+        "mpv_version": app.mpv.version(),
+        "mpv_log": app.mpv.log_path(),
         "mpv_embed": app.mpv.embed_info(),
     }))
 }

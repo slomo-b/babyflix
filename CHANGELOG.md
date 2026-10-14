@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.2] — 2026-10-15
+
+### Fixed
+- **"MPV could not start" on macOS is now rare — and diagnosable when it happens.** The wait for
+  MPV's IPC socket was a hard 6 s, which a cold *first* launch can exceed (Homebrew's binary is
+  checked by Gatekeeper the first time it runs). It is now 15 s, and
+  `BABYFLIX_MPV_IPC_TIMEOUT` (seconds) raises it without a rebuild.
+- If MPV refuses the socket in the profile directory, a second attempt runs with a short socket
+  path in the temp directory (macOS caps socket paths at 104 bytes).
+- The failure dialog no longer stops at *"mpv IPC endpoint was not reachable"*. It now reports
+  whether MPV **died** during startup (with its exit status) or **kept running** without opening
+  the socket, plus the MPV binary, its version and the tail of `mpv.log` — a screenshot is
+  enough to pinpoint the cause.
+
+### Added
+- MPV writes its own log next to the profile (`mpv.log`); `/api/health` reports `mpv`,
+  `mpv_version` and `mpv_log`.
+
 ## [1.5.1] — 2026-10-12
 
 ### Fixed
