@@ -83,6 +83,22 @@ fn socket_path(_dir: &Path) -> String {
     format!(r"\\.\pipe\babyflix-mpv-{}", std::process::id())
 }
 
+/// Second endpoint to try when the first one is refused: macOS caps a socket
+/// path at 104 bytes and a profile directory can be unusable for other reasons,
+/// so the retry uses a short ASCII path in the temp dir. `None` where MPV's
+/// endpoint is not a filesystem socket (Windows named pipe).
+#[cfg(unix)]
+fn alt_socket(primary: &str) -> Option<String> {
+    let alt = std::env::temp_dir().join(format!("babyflix-mpv-{}.sock", std::process::id()));
+    let alt = alt.to_string_lossy().into_owned();
+    (alt != primary).then_some(alt)
+}
+
+#[cfg(windows)]
+fn alt_socket(_primary: &str) -> Option<String> {
+    None
+}
+
 /// Wait for MPV's IPC endpoint to appear. The `Err` carries *why* we gave up:
 /// "mpv exited during startup" (bad option, blocked binary) and "mpv runs but
 /// never opened the socket" (socket path refused) need different fixes, and
@@ -109,6 +125,19 @@ fn wait_for_ipc(child: &mut Child, sock: &str, timeout: Duration) -> Result<Ipc,
 /// Where MPV writes its own log (also quoted in start errors).
 fn log_file_path(dir: &Path) -> PathBuf {
     dir.join("mpv.log")
+}
+
+/// Quality/speed options that a retry deliberately omits: an MPV build without
+/// them, or a machine whose driver refuses them, must still be able to play.
+fn quality_args(lean: bool, vo: &str, hwdec: &str, profile: &str) -> Vec<String> {
+    if lean {
+        return Vec::new();
+    }
+    let mut args = vec![format!("--hwdec={hwdec}"), format!("--vo={vo}")];
+    if !profile.is_empty() && profile != "none" {
+        args.push(format!("--profile={profile}"));
+    }
+    args
 }
 
 /// Last `max` characters of MPV's own log (empty when it never wrote one).
@@ -239,6 +268,8 @@ pub struct Mpv {
     shared: Arc<Shared>,
     /// Host window handle + the native surface the video is painted into.
     stage: Mutex<StageState>,
+    /// Why a start needed more than one attempt (visible in `/api/health`).
+    degraded: Mutex<Option<String>>,
 }
 
 /// Embedded-video state. `rect` is what the UI last asked for (physical px,
@@ -262,6 +293,7 @@ impl Mpv {
             proc: Mutex::new(None),
             shared: Arc::new(Shared::new()),
             stage: Mutex::new(StageState::default()),
+            degraded: Mutex::new(None),
         }
     }
 
@@ -291,6 +323,11 @@ impl Mpv {
     /// Path of MPV's own log file (diagnostics; see `/api/health`).
     pub fn log_path(&self) -> String {
         log_file_path(&self.dir).to_string_lossy().into_owned()
+    }
+
+    /// Set when the last start only worked on a retry (fallback options/socket).
+    pub fn degraded(&self) -> Option<String> {
+        self.degraded.lock().unwrap().clone()
     }
 
     pub fn available(&self) -> bool {
@@ -460,6 +497,7 @@ impl Mpv {
         // into the error message, so a screenshot carries the real reason.
         let log_path = log_file_path(&self.dir);
         let _ = std::fs::remove_file(&log_path);
+        *self.degraded.lock().unwrap() = None;
 
         // Escape hatch for a machine whose first MPV launch is slow (Gatekeeper
         // checks the binary on first run): no rebuild needed to test a longer wait.
@@ -515,7 +553,9 @@ impl Mpv {
         };
 
         // Every argument except `--input-ipc-server` - that one is per attempt.
-        let add_args = |cmd: &mut Command, sock: &str| {
+        // `lean` leaves the risky ones out: a retry must work on an mpv that
+        // refuses `--vo`/`--hwdec`/a profile, so it uses platform defaults.
+        let add_args = |cmd: &mut Command, sock: &str, lean: bool| {
             cmd.arg("--idle=yes")
                 .arg("--no-terminal")
                 .arg("--force-window=yes")
@@ -523,8 +563,6 @@ impl Mpv {
                 .arg("--save-position-on-quit=no")
                 .arg(format!("--input-ipc-server={sock}"))
                 .arg("--osd-level=1")
-                .arg(format!("--hwdec={hwdec}"))
-                .arg(format!("--vo={vo}"))
                 .arg("--cache-secs=30")
                 .arg(format!("--demuxer-max-bytes={}", 256 * 1024 * 1024))
                 .arg(format!("--volume={volume}"))
@@ -555,8 +593,8 @@ impl Mpv {
             if o.muted == Some(true) {
                 cmd.arg("--mute=yes");
             }
-            if !profile.is_empty() && profile != "none" {
-                cmd.arg(format!("--profile={profile}"));
+            for a in quality_args(lean, &vo, &hwdec, &profile) {
+                cmd.arg(a);
             }
             if let Some(ua) = &o.user_agent {
                 cmd.arg(format!("--user-agent={ua}"));
@@ -572,58 +610,67 @@ impl Mpv {
             hidden(cmd);
         };
 
-        // Two IPC candidates. macOS caps a socket path at 104 bytes and a data
-        // directory can be refused for other reasons; the temp dir path is short,
-        // ASCII and always writable. A second path only helps while MPV lives -
-        // if MPV died on startup the log explains why and a retry is pointless.
-        let mut sockets: Vec<String> = vec![sock];
-        #[cfg(unix)]
-        {
-            let alt = std::env::temp_dir().join(format!("babyflix-mpv-{}.sock", std::process::id()));
-            let alt = alt.to_string_lossy().into_owned();
-            if alt != sockets[0] {
-                sockets.push(alt);
-            }
+        // Attempt 1: full option set on the profile socket. Attempt 2: a
+        // conservative start (platform default `vo`/`hwdec`, no profile) on a
+        // short temp path - macOS caps socket paths at 104 bytes. A refused
+        // option or an unusable path must not cost the user the whole player,
+        // and both failures are reported when even the retry cannot come up.
+        let mut attempts: Vec<(bool, String)> = vec![(false, sock.clone())];
+        match alt_socket(&sock) {
+            Some(alt) => attempts.push((true, alt)),
+            None => attempts.push((true, sock.clone())),
         }
 
-        let mut attempt_why = String::from("mpv never opened its IPC endpoint");
+        let mut failures: Vec<String> = Vec::new();
+        let mut first_log: Option<String> = None;
         let mut started: Option<(Child, Ipc, String)> = None;
-        for (i, candidate) in sockets.into_iter().enumerate() {
+        for (i, (lean, candidate)) in attempts.iter().enumerate() {
             #[cfg(unix)]
-            let _ = std::fs::remove_file(&candidate);
+            let _ = std::fs::remove_file(candidate);
             let mut cmd = Command::new(&bin);
-            add_args(&mut cmd, &candidate);
+            add_args(&mut cmd, candidate, *lean);
             let mut c = cmd.spawn().map_err(|e| anyhow!("mpv could not start: {e}"))?;
-            // First candidate gets the full cold-start budget; the fallback path
-            // only has to prove itself quickly, so a hard failure stays readable.
+            // First attempt gets the full cold-start budget; a retry only has to
+            // prove itself quickly, so a hard failure stays readable.
             let budget = if i == 0 { ipc_timeout } else { Duration::from_secs(5) };
-            match wait_for_ipc(&mut c, &candidate, budget) {
+            match wait_for_ipc(&mut c, candidate, budget) {
                 Ok(conn) => {
-                    started = Some((c, conn, candidate));
+                    started = Some((c, conn, candidate.clone()));
                     break;
                 }
                 Err(why) => {
-                    let exited = matches!(c.try_wait(), Ok(Some(_)));
                     let _ = c.kill();
                     let _ = c.wait();
-                    attempt_why = why;
-                    if exited {
-                        break;
+                    let label = if *lean { "lean args" } else { "full args" };
+                    failures.push(format!("{label}: {why}"));
+                    if first_log.is_none() {
+                        let tail = log_tail(&log_path, 400);
+                        if !tail.is_empty() {
+                            first_log = Some(tail);
+                        }
                     }
                 }
             }
         }
         let (child, conn, used_sock) = match started {
-            Some(t) => t,
+            Some(t) => {
+                // A retry that worked is worth reporting: playback continues with
+                // reduced options, and `/api/health` says why.
+                *self.degraded.lock().unwrap() = (!failures.is_empty()).then(|| failures.join("; "));
+                t
+            }
             None => {
-                let mut msg = format!("mpv IPC endpoint was not reachable ({attempt_why})");
+                let mut msg = String::from("mpv IPC endpoint was not reachable");
+                for f in &failures {
+                    msg.push_str("\n· ");
+                    msg.push_str(f);
+                }
                 msg.push_str(&format!(
                     "\nbinary: {} [{}]",
                     bin.display(),
                     self.version().unwrap_or_else(|| "version unknown".into())
                 ));
-                let tail = log_tail(&log_path, 400);
-                if !tail.is_empty() {
+                if let Some(tail) = first_log {
                     msg.push_str(&format!("\nlog {}: {tail}", log_path.display()));
                 }
                 return Err(anyhow!(msg));
@@ -898,6 +945,17 @@ mod tests {
         let why = wait_for_ipc(&mut dead, &socket, Duration::from_secs(5)).unwrap_err();
         let _ = dead.wait();
         assert!(why.contains("exited during startup"), "unerwartet: {why}");
+    }
+
+    /// The retry exists to survive an option MPV refuses - so it must not send any.
+    #[test]
+    fn retry_leaves_out_the_options_mpv_may_refuse() {
+        let full = quality_args(false, "gpu-next", "auto-safe", "high-quality");
+        for want in ["--vo=gpu-next", "--hwdec=auto-safe", "--profile=high-quality"] {
+            assert!(full.iter().any(|a| a == want), "{want} fehlt im vollen Satz");
+        }
+        let lean = quality_args(true, "gpu-next", "auto-safe", "high-quality");
+        assert!(lean.is_empty(), "Retry darf nichts Riskantes senden: {lean:?}");
     }
 
     #[test]

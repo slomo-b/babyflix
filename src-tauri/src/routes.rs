@@ -70,6 +70,7 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "mpv": app.mpv.path(),
         "mpv_version": app.mpv.version(),
         "mpv_log": app.mpv.log_path(),
+        "mpv_degraded": app.mpv.degraded(),
         "mpv_embed": app.mpv.embed_info(),
     }))
 }
