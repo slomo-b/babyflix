@@ -36,11 +36,6 @@ base64 = "0.22"
 percent-encoding = "2"
 anyhow = "1"
 flate2 = "1"
-raw-window-handle = "0.6"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# Native video surface for the embedded MPV engine (see src/embed.rs).
-x11-dl = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

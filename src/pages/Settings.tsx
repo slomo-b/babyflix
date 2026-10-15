@@ -7,7 +7,6 @@ import {
   Download,
   Languages,
   LogOut,
-  MonitorPlay,
   RefreshCw,
   ShieldCheck,
   Stethoscope,
@@ -45,8 +44,6 @@ export default function Settings() {
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagError, setDiagError] = useState<string | null>(null);
   const savedLogin = useStore((s) => s.savedLogin);
-  const playerEngine = useStore((s) => s.playerEngine);
-  const setPlayerEngine = useStore((s) => s.setPlayerEngine);
 
   const upStatus = useUpdater((s) => s.status);
   const upVersion = useUpdater((s) => s.version);
@@ -318,49 +315,6 @@ export default function Settings() {
               { value: "en", label: "English" },
             ]}
           />
-        </div>
-
-        <div className="border-b border-[var(--border)] py-3">
-          <div className="flex items-center justify-between gap-4">
-            <span className="flex items-center gap-2 text-sm">
-              <MonitorPlay size={16} />
-              <span>
-                {t("settings.engine")}
-                <span className="block text-xs text-[var(--muted)]">{t("settings.engineHint")}</span>
-              </span>
-            </span>
-            <div className="flex shrink-0 overflow-hidden rounded-xl border border-[var(--border)]">
-              {(["web", "mpv"] as const).map((e) => (
-                <button
-                  key={e}
-                  onClick={() => setPlayerEngine(e)}
-                  className={`px-3 py-1.5 text-xs font-semibold transition ${
-                    playerEngine === e
-                      ? "bg-[var(--accent)] text-white"
-                      : "text-[var(--muted)] hover:bg-white/5 hover:text-white"
-                  }`}
-                >
-                  {e === "web" ? t("settings.engineWeb") : t("settings.engineMpv")}
-                </button>
-              ))}
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-[var(--muted)]">
-            {playerEngine === "web" ? t("settings.engineWebHint") : t("settings.engineMpvHint")}
-          </p>
-          {health.data?.mpv ? (
-            <p className="mt-1 truncate text-[11px] text-[var(--muted)]">
-              {t("settings.engineActive", { name: health.data.mpv })}
-            </p>
-          ) : (
-            <p
-              className={`mt-1 text-[11px] ${
-                playerEngine === "mpv" ? "text-amber-400" : "text-[var(--muted)]"
-              }`}
-            >
-              {t("settings.engineMpvMissing")}
-            </p>
-          )}
         </div>
 
         <CapabilitiesCard caps={health.data?.capabilities} lastRemux={health.data?.last_remux} />

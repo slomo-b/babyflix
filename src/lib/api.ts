@@ -164,8 +164,6 @@ export interface HealthResponse {
   /** Path of the FFmpeg binary the backend uses, or null when it is missing. */
   ffmpeg?: string | null;
   ffprobe?: string | null;
-  /** Path of the MPV binary for the native playback engine, or null when missing. */
-  mpv?: string | null;
   /** Codec probe reported by the webview (`POST /api/capabilities`). */
   capabilities?: CapabilitiesReport | null;
   /** Decision of the most recent remux session. */
@@ -204,51 +202,6 @@ export interface StreamsResponse {
   video: StreamInfo[];
   subtitle: StreamInfo[];
   duration: number | null;
-}
-
-/** Zustand des nativen MPV-Prozesses (Engine "mpv"). */
-export interface MpvEmbed {
-  /** "child-window" = Video läuft im eigenen Child-Window der App, "own-window" = eigenes Fenster. */
-  mode: "child-window" | "own-window" | null;
-  wid: number | null;
-  rect: { x: number; y: number; w: number; h: number };
-  visible: boolean;
-}
-
-export interface MpvStatus {
-  available: boolean;
-  path: string | null;
-  version: string | null;
-  running: boolean;
-  props: Record<string, unknown>;
-  seq: number;
-  embed?: MpvEmbed;
-}
-
-export interface MpvPoll {
-  seq: number;
-  /** true = der Client war zu langsam, das Event-Fenster ist gerissen (neu laden). */
-  reset: boolean;
-  running: boolean;
-  events: Record<string, unknown>[];
-  props: Record<string, unknown>;
-}
-
-export interface MpvStartOpts {
-  kind: Kind;
-  id: string;
-  ext?: string;
-  start?: number;
-  audio?: number;
-  sub?: number;
-  volume?: number;
-  muted?: boolean;
-  speed?: number;
-  fullscreen?: boolean;
-  ontop?: boolean;
-  title?: string;
-  alang?: string;
-  slang?: string;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -364,31 +317,6 @@ export const api = {
     if (ext) sp.set("ext", ext);
     return req<StreamsResponse>(`/api/streams?${sp.toString()}`);
   },
-
-  // --- native MPV engine (optional playback backend) ---
-  mpvStatus: () => req<MpvStatus>("/api/mpv/status"),
-  mpvPoll: (since: number) => req<MpvPoll>(`/api/mpv/poll?since=${since}`),
-  mpvStart: (o: MpvStartOpts) =>
-    req<{ ok: boolean; url: string; path: string | null }>("/api/mpv/start", {
-      method: "POST",
-      body: JSON.stringify(o),
-    }),
-  mpvCmd: (command: unknown[]) =>
-    req<{ ok: boolean }>("/api/mpv/cmd", {
-      method: "POST",
-      body: JSON.stringify({ command }),
-    }),
-  mpvStop: () => req<{ ok: boolean }>("/api/mpv/stop", { method: "POST" }).catch(() => ({ ok: false })),
-  /**
-   * Meldet dem Backend, wo das Video liegen soll (physische Pixel, relativ zum
-   * Client-Bereich des Fensters). Die native Video-Fläche wird dorthin
-   * verschoben/skaliert bzw. (ohne Child-Windows) dort angedockt.
-   */
-  mpvStage: (r: { x: number; y: number; w: number; h: number; visible: boolean }) =>
-    req<{ ok: boolean; embed: MpvEmbed }>("/api/mpv/stage", {
-      method: "POST",
-      body: JSON.stringify(r),
-    }),
 };
 
 export function imgUrl(u: string | null | undefined): string | undefined {

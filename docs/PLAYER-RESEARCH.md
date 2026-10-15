@@ -163,14 +163,18 @@ on Windows) and drop `libx264` — that yields an LGPL-compatible FFmpeg without
 
 ## 10. Phases
 
-| Phase | Content | Risk |
+| Phase | Content | Status |
 |---|---|---|
-| 0 | W1 probe + W8 diagnostics only — no behaviour change | very low |
-| 1 | W2 copy-first + fMP4; W6 single connection | medium — the actual win |
-| 2 | W3 multi-audio, W4 subtitles, W5 live remux | medium |
-| 3 | W7 delete the mpv path and unify the UI | mechanical, large diff |
+| 0 | W1 capability probe + W8 diagnostics only — no behaviour change | **done** (`feat(player): Phase 0`) |
+| 1 | W2 copy-first + fMP4; W6 single connection | open — the actual win |
+| 2 | W3 multi-audio, W4 subtitles, W5 live remux | open — **W4 and W5 are parity gaps** now that mpv is gone |
+| 3 | W7 delete the mpv path and unify the UI | **done** (~3500 lines removed) |
 
-Phase 0 is safe to ship alone and already removes the main "why was this transcoded?" guesswork.
+Phase 3 landed before Phase 1/2, so on the current branch three capabilities that mpv used to
+provide are temporarily missing and must land before a release: subtitles (W4), live streams that
+only arrive as raw MPEG-TS (W5), and copy-instead-of-transcode for AC-3/E-AC-3 (W2). Nothing is
+released until that is settled.
+
 
 ## 11. Appendix — current architecture (as found)
 

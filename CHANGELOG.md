@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **One player instead of two: the native MPV engine has been removed.** Playback is now FFmpeg
+  plus the platform webview, and nothing else. The whole engine is gone — `mpv.rs` (1050 lines),
+  `embed.rs` (456), the `PlayerShell` UI (1179), the `/api/mpv/*` routes, the "Playback engine"
+  switch in Settings and the `playerEngine` store field (~3500 lines in total). Consequences:
+  **nothing has to be installed next to BabyFlix** any more (the "install MPV" hint is gone), the
+  macOS always-on-top video window that had to be docked over the app window is gone, and there is
+  one player UI instead of two that carried the same controls twice.
+  Follow-ups are tracked in `docs/PLAYER-RESEARCH.md`: the webview path still re-encodes every
+  non-H.264 video (AC-3/E-AC-3 could be copied), live streams that only arrive as raw MPEG-TS
+  need an FFmpeg live remux, and subtitles are still stripped from VOD.
+
 ## [1.5.3] — 2026-10-15
 
 ### Fixed

@@ -37,11 +37,6 @@ pub struct App {
     pub ratings_started: AtomicBool,
     pub locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub remux: crate::remux::Remux,
-    pub mpv: crate::mpv::Mpv,
-    /// Native handle of the app window plus the window itself - the embedded
-    /// video surface is placed relative to both.
-    pub host: std::sync::RwLock<Option<crate::embed::Host>>,
-    pub window: std::sync::RwLock<Option<tauri::WebviewWindow>>,
     /// Capability report of the running webview (codec probing happens in the UI,
     /// because only the webview knows what its platform can decode).
     pub capabilities: RwLock<Value>,
@@ -58,7 +53,6 @@ impl App {
             .expect("http client");
         let _ = std::fs::create_dir_all(&dir);
         let remux = crate::remux::Remux::new(dir.join("hls"));
-        let mpv = crate::mpv::Mpv::new(dir.clone());
         Arc::new(App {
             client,
             dir,
@@ -69,44 +63,8 @@ impl App {
             ratings_started: AtomicBool::new(false),
             locks: RwLock::new(HashMap::new()),
             remux,
-            mpv,
-            host: std::sync::RwLock::new(None),
-            window: std::sync::RwLock::new(None),
             capabilities: RwLock::new(Value::Null),
         })
-    }
-
-    /// Remember the main window and its native handle (called once from setup).
-    pub fn set_host(&self, window: tauri::WebviewWindow, host: Option<crate::embed::Host>) {
-        self.mpv.set_host(host);
-        *self.host.write().unwrap() = host;
-        *self.window.write().unwrap() = Some(window);
-    }
-
-    /// Where the window's client area sits on screen (physical pixels).
-    pub fn window_origin(&self) -> (i32, i32) {
-        self.window
-            .read()
-            .ok()
-            .and_then(|g| g.as_ref().and_then(|w| w.inner_position().ok()))
-            .map(|p| (p.x, p.y))
-            .unwrap_or((0, 0))
-    }
-
-    /// Place (and show/hide) the embedded video surface.
-    pub fn apply_stage(&self, client: crate::embed::Rect, visible: bool) {
-        self.mpv.set_stage(client, self.window_origin(), visible);
-    }
-
-    /// Window moved / resized / focus changed: keep the video surface glued to
-    /// the stage rectangle the UI reported.
-    pub fn restage(&self, focused: bool) {
-        let (rect, visible) = self.mpv.stage_rect();
-        if rect.w <= 2 && rect.h <= 2 {
-            return; // the UI has not reported a stage rectangle yet
-        }
-        self.mpv.set_stage(rect, self.window_origin(), visible);
-        self.mpv.set_ontop(focused);
     }
 
     fn config_path(&self) -> PathBuf {

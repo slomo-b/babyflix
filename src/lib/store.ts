@@ -105,11 +105,6 @@ interface AppStore {
   categorySidebarOpen: boolean;
   setCategorySidebarOpen: (v: boolean) => void;
 
-  /** Wiedergabe-Engine: "mpv" = native MPV-Engine (Hauptweg, im App-Fenster
-   *  eingebettet), "web" = hls.js-Webview als Rückfallebene ohne MPV. */
-  playerEngine: "web" | "mpv";
-  setPlayerEngine: (v: "web" | "mpv") => void;
-
   /** Remembered login, so the user stays signed in until the account is removed. */
   savedLogin: SavedLogin | null;
   setSavedLogin: (v: SavedLogin | null) => void;
@@ -162,9 +157,6 @@ export const useStore = create<AppStore>()(
       categorySidebarOpen: true,
       setCategorySidebarOpen: (v) => set({ categorySidebarOpen: v }),
 
-      playerEngine: "mpv",
-      setPlayerEngine: (v) => set({ playerEngine: v }),
-
       savedLogin: null,
       setSavedLogin: (v) => set({ savedLogin: v }),
     }),
@@ -176,10 +168,6 @@ export const useStore = create<AppStore>()(
         if (version < 2) {
           return { ...(state as Record<string, unknown>), favorites: [] } as unknown as AppStore;
         }
-        // v2 -> v3: MPV ist jetzt die Haupt-Engine (Video läuft im App-Fenster).
-        if (version < 3) {
-          return { ...(state as Record<string, unknown>), playerEngine: "mpv" } as unknown as AppStore;
-        }
         return state as AppStore;
       },
       partialize: (s) => ({
@@ -189,7 +177,6 @@ export const useStore = create<AppStore>()(
         autoResume: s.autoResume,
         hideAdult: s.hideAdult,
         categorySidebarOpen: s.categorySidebarOpen,
-        playerEngine: s.playerEngine,
         savedLogin: s.savedLogin,
       }),
     }

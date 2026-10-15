@@ -308,7 +308,6 @@ dependencies = [
  "flate2",
  "futures-util",
  "percent-encoding",
- "raw-window-handle",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -319,7 +318,6 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tower-http",
- "x11-dl",
 ]
 
 [[package]]
