@@ -4,7 +4,7 @@
 use anyhow::{anyhow, Result};
 use flate2::read::GzDecoder;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -60,17 +60,75 @@ pub(crate) fn hidden(cmd: &mut Command) {
     let _ = cmd;
 }
 
-/// Which parts of a stream FFmpeg may **copy** instead of re-encoding, given the
-/// source codecs.
+/// Which parts of a stream FFmpeg may **copy** instead of re-encoding.
 ///
-/// This is the single place holding the copy-vs-transcode policy. Phase 1 of
-/// `docs/PLAYER-RESEARCH.md` replaces the hard-coded codec lists here with the
-/// webview's probed capabilities (`/api/capabilities`), so the decision follows
-/// what the platform can really decode instead of a fixed assumption.
-pub(crate) fn copy_actions(vcodec: &str, acodec: Option<&str>) -> (bool, bool) {
-    let video = vcodec == "h264";
-    let audio = matches!(acodec, Some("aac") | Some("mp3"));
+/// This is the single place holding the copy-vs-transcode policy. The codec
+/// lists come from the webview's own probe (`/api/capabilities`), so the decision
+/// follows what the platform can really decode instead of a fixed assumption -
+/// e.g. AC-3/E-AC-3 can be copied on both macOS and Windows.
+pub(crate) fn copy_actions(
+    vcodec: &str,
+    acodec: Option<&str>,
+    caps: &DecodeCaps,
+) -> (bool, bool) {
+    let video = caps.video.contains(codec_key(vcodec));
+    let audio = acodec.is_some_and(|a| caps.audio.contains(codec_key(a)));
     (video, audio)
+}
+
+/// Normalises FFmpeg codec names to the keys the webview probe uses.
+fn codec_key(codec: &str) -> &str {
+    match codec {
+        "h265" => "hevc",
+        "avc1" => "h264",
+        other => other,
+    }
+}
+
+/// What the running webview reported it can decode.
+///
+/// Built from the report the UI posts to `/api/capabilities` (see
+/// `docs/PLAYER-RESEARCH.md`, workstream W1). A codec counts as supported when
+/// MSE accepts it, because that is the path playback actually takes.
+#[derive(Clone, Debug, Default)]
+pub struct DecodeCaps {
+    pub video: HashSet<String>,
+    pub audio: HashSet<String>,
+}
+
+impl DecodeCaps {
+    /// The policy used before the UI has reported, or when the report is
+    /// unusable: copy H.264 and AAC/MP3 only - exactly what the app did before
+    /// the probe existed, so a missing report can never make things worse.
+    pub fn conservative() -> Self {
+        DecodeCaps {
+            video: HashSet::from(["h264".to_string()]),
+            audio: HashSet::from(["aac".to_string(), "mp3".to_string()]),
+        }
+    }
+
+    /// Parse the webview report. `None` when there is nothing usable in it -
+    /// an empty report must never turn every codec into "transcode".
+    pub fn from_report(report: &Value) -> Option<Self> {
+        let obj = report.as_object()?;
+        let group = |name: &str| -> HashSet<String> {
+            obj.get(name)
+                .and_then(|g| g.as_object())
+                .map(|g| {
+                    g.iter()
+                        .filter(|(_, c)| c.get("mse").and_then(Value::as_bool).unwrap_or(false))
+                        .map(|(k, _)| k.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let video = group("video");
+        let audio = group("audio");
+        if video.is_empty() {
+            return None;
+        }
+        Some(DecodeCaps { video, audio })
+    }
 }
 
 /// File name of an executable on this platform (`ffmpeg` vs `ffmpeg.exe`).
@@ -421,7 +479,13 @@ impl Remux {
     }
 
     /// Start (or reuse) a remux session; returns the token, duration and stream info.
-    pub fn start(&self, key: &str, url: &str, audio: Option<usize>) -> Result<RemuxStart> {
+    pub fn start(
+        &self,
+        key: &str,
+        url: &str,
+        audio: Option<usize>,
+        caps: &DecodeCaps,
+    ) -> Result<RemuxStart> {
         let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
         // Reuse an existing session for the exact key.
@@ -484,7 +548,7 @@ impl Remux {
         // What FFmpeg will be told to do. Recorded for diagnostics: without a test
         // provider this is the only way to see whether a stream was copied or
         // re-encoded - and which codec forced the re-encode.
-        let (video_copy, audio_copy) = copy_actions(&vcodec, acodec.as_deref());
+        let (video_copy, audio_copy) = copy_actions(&vcodec, acodec.as_deref(), caps);
         let decision = json!({
             "key": key,
             "video_codec": vcodec,
@@ -492,6 +556,7 @@ impl Remux {
             "audio_codec": acodec,
             "audio": if audio_copy { "copy" } else { "transcode" },
             "segments": "mpegts",
+            "probed": !caps.video.is_empty(),
         });
         *self.last_decision.write().unwrap() = Some(decision.clone());
 
@@ -599,19 +664,43 @@ impl Remux {
 
 #[cfg(test)]
 mod tests {
-    use super::copy_actions;
+    use super::{copy_actions, DecodeCaps};
+    use serde_json::{json, Value};
 
-    /// The policy as it stands before the capability probe drives it (Phase 1):
-    /// copy H.264 video and AAC/MP3 audio, re-encode everything else.
+    /// Before any probe: exactly the policy the app used to hard-code, so a
+    /// missing report can never make playback worse.
     #[test]
-    fn copies_only_what_the_webview_can_decode() {
-        assert_eq!(copy_actions("h264", Some("aac")), (true, true));
-        assert_eq!(copy_actions("h264", Some("mp3")), (true, true));
-        assert_eq!(copy_actions("h264", Some("ac3")), (true, false));
-        assert_eq!(copy_actions("hevc", Some("aac")), (false, true));
-        assert_eq!(copy_actions("hevc", Some("ac3")), (false, false));
-        assert_eq!(copy_actions("mpeg4", Some("dts")), (false, false));
+    fn without_a_probe_only_h264_and_aac_mp3_are_copied() {
+        let caps = DecodeCaps::conservative();
+        assert_eq!(copy_actions("h264", Some("aac"), &caps), (true, true));
+        assert_eq!(copy_actions("h264", Some("mp3"), &caps), (true, true));
+        assert_eq!(copy_actions("h264", Some("ac3"), &caps), (true, false));
+        assert_eq!(copy_actions("hevc", Some("aac"), &caps), (false, true));
+        assert_eq!(copy_actions("hevc", Some("ac3"), &caps), (false, false));
         // No audio stream at all: nothing to copy.
-        assert_eq!(copy_actions("h264", None), (true, false));
+        assert_eq!(copy_actions("h264", None, &caps), (true, false));
+    }
+
+    /// The probe is what unlocks copying AC-3/E-AC-3 and HEVC.
+    #[test]
+    fn a_probe_widens_what_is_copied() {
+        let caps = DecodeCaps::from_report(&json!({
+            "video": { "h264": { "mse": true }, "hevc": { "mse": true }, "av1": { "mse": false } },
+            "audio": { "aac": { "mse": true }, "ac3": { "mse": true }, "dts": { "mse": false } }
+        }))
+        .expect("report is usable");
+        assert_eq!(copy_actions("hevc", Some("ac3"), &caps), (true, true));
+        assert_eq!(copy_actions("av1", Some("aac"), &caps), (false, true));
+        assert_eq!(copy_actions("h264", Some("dts"), &caps), (true, false));
+        // Alias: FFmpeg says h265 where the probe says hevc.
+        assert_eq!(copy_actions("h265", Some("eac3"), &caps), (true, false));
+    }
+
+    /// An unusable report must not cause blanket transcoding.
+    #[test]
+    fn an_empty_report_is_ignored() {
+        assert!(DecodeCaps::from_report(&Value::Null).is_none());
+        assert!(DecodeCaps::from_report(&json!({})).is_none());
+        assert!(DecodeCaps::from_report(&json!({ "video": {}, "audio": {} })).is_none());
     }
 }

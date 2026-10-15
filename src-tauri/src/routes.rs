@@ -16,6 +16,7 @@ use tower_http::cors::CorsLayer;
 use crate::adult;
 use crate::m3u;
 use crate::proxy;
+use crate::remux::DecodeCaps;
 use crate::state::{App, Config};
 use crate::xtream::{self, Credentials, MediaItem};
 
@@ -732,10 +733,14 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         .filter(|e| !e.is_empty())
         .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
     let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
+    let caps = {
+        let report = app.capabilities.read().await;
+        DecodeCaps::from_report(&report).unwrap_or_else(DecodeCaps::conservative)
+    };
     let key = format!("{}:{}:{}:{}", q.kind, q.id, ext, q.audio.unwrap_or(0));
     let audio = q.audio;
     let app2 = app.clone();
-    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio))
+    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps))
         .await
         .map_err(|e| ApiError(e.to_string()))?
         .map_err(ApiError::from)?;
