@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.4] — 2026-10-16
 
 ### Changed
 - **One player instead of two: the native MPV engine has been removed.** Playback is now FFmpeg
@@ -10,9 +10,42 @@
   **nothing has to be installed next to BabyFlix** any more (the "install MPV" hint is gone), the
   macOS always-on-top video window that had to be docked over the app window is gone, and there is
   one player UI instead of two that carried the same controls twice.
-  Follow-ups are tracked in `docs/PLAYER-RESEARCH.md`: the webview path still re-encodes every
-  non-H.264 video (AC-3/E-AC-3 could be copied), live streams that only arrive as raw MPEG-TS
-  need an FFmpeg live remux, and subtitles are still stripped from VOD.
+- **The copy-vs-transcode decision now follows what the webview can really decode** instead of a
+  fixed codec list. The UI probes the running webview once (`MediaSource.isTypeSupported` plus
+  `mediaCapabilities.decodingInfo`) and reports the result to the backend, which then copies
+  whatever is decodable: AC-3/E-AC-3 audio is passed through instead of being re-encoded to AAC,
+  and HEVC is re-encoded only where the platform cannot handle it. Without a usable report the old
+  conservative policy applies, so a missing probe can never make playback worse.
+- **The categories of movies, series and live TV moved into a collapsible second sidebar**
+  (search on top, categories below) instead of a horizontal chip row and a dropdown. The collapsed
+  state is persisted.
+- **Continue watching lists each series once** — the most recent episode instead of every started
+  one. The history itself stays complete, because the detail page needs it for the per-episode
+  progress bars. Removing a series card forgets that series as a whole.
+
+### Added
+- **Subtitles for VOD.** Text subtitle tracks are extracted to WebVTT in a dedicated FFmpeg run
+  and offered in the subtitle menu (previously they were stripped). Image subtitles (PGS/VOBSUB)
+  cannot be represented this way and are skipped. A failed extraction leaves playback untouched.
+- **Live fallback for panels that only deliver raw MPEG-TS.** When the direct attempt fails, FFmpeg
+  converts the channel on the fly and the player follows its rolling HLS playlist. HLS panels are
+  unaffected. Live sessions get a 30-minute idle grace instead of 2 minutes.
+- **"Random episode" button** on the series detail page, between the play button and the
+  trailer/watchlist row. It skips the last watched episode whenever an alternative exists.
+- **Adult-content filter** (Settings, on by default): category names such as Adult/XXX/Erotik are
+  hidden from the home page, movies, series, live TV, search and the category pickers. Only
+  categories are matched, never single titles.
+- **Playback diagnostics** in Settings: a collapsible card showing the probed codec/container
+  support and the decision of the last remux (copied or re-encoded, and which codec caused it).
+- `POST /api/capabilities` (webview report) and `POST /api/subs` (subtitle extraction).
+
+### Fixed
+- **Coming back from a detail page keeps your position in the list.** `useScrollMemory` read
+  `window.scrollY`, but the app scrolls inside an inner container, so it never worked. It now
+  tracks the real container and saves continuously instead of only on unmount — by then the list
+  has already shrunk and the browser has clamped the value.
+- The MPV IPC test spawned `/bin/false`, which does not exist on macOS (it is `/usr/bin/false`
+  there). The test therefore always failed locally while CI on Linux stayed green.
 
 ## [1.5.3] — 2026-10-15
 
