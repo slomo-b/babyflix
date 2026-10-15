@@ -1,3 +1,4 @@
+mod adult;
 mod embed;
 mod imdb;
 mod m3u;

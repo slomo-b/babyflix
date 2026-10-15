@@ -74,6 +74,10 @@ interface AppStore {
   autoplayNext: boolean;
   setAutoplayNext: (v: boolean) => void;
 
+  /** Erwachsenen-Kategorien (Adult/XXX/Erotik …) ausblenden. Standard: an. */
+  hideAdult: boolean;
+  setHideAdult: (v: boolean) => void;
+
   /** Wiedergabe-Engine: "mpv" = native MPV-Engine (Hauptweg, im App-Fenster
    *  eingebettet), "web" = hls.js-Webview als Rückfallebene ohne MPV. */
   playerEngine: "web" | "mpv";
@@ -115,6 +119,9 @@ export const useStore = create<AppStore>()(
       autoplayNext: true,
       setAutoplayNext: (v) => set({ autoplayNext: v }),
 
+      hideAdult: true,
+      setHideAdult: (v) => set({ hideAdult: v }),
+
       playerEngine: "mpv",
       setPlayerEngine: (v) => set({ playerEngine: v }),
 
@@ -140,6 +147,7 @@ export const useStore = create<AppStore>()(
         favorites: s.favorites,
         autoplayNext: s.autoplayNext,
         autoResume: s.autoResume,
+        hideAdult: s.hideAdult,
         playerEngine: s.playerEngine,
         savedLogin: s.savedLogin,
       }),

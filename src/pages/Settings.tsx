@@ -58,6 +58,8 @@ export default function Settings() {
   const setAutoplayNext = useStore((s) => s.setAutoplayNext);
   const autoResume = useStore((s) => s.autoResume);
   const setAutoResume = useStore((s) => s.setAutoResume);
+  const hideAdult = useStore((s) => s.hideAdult);
+  const setHideAdult = useStore((s) => s.setHideAdult);
   const clearHistory = useStore((s) => s.clearHistory);
   const historyCount = useStore((s) => s.history.length);
   const setSavedLogin = useStore((s) => s.setSavedLogin);
@@ -382,6 +384,23 @@ export default function Settings() {
             type="checkbox"
             checked={autoResume}
             onChange={(e) => setAutoResume(e.target.checked)}
+            className="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/20 transition-all checked:bg-[var(--accent)] relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-all checked:before:left-[18px]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between gap-4 py-3">
+          <span className="text-sm">
+            {t("settings.hideAdult")}
+            <span className="block text-xs text-[var(--muted)]">{t("settings.hideAdultHint")}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={hideAdult}
+            onChange={(e) => {
+              setHideAdult(e.target.checked);
+              // Gefiltert wird im Backend - alle Listen neu holen.
+              void qc.invalidateQueries();
+            }}
             className="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/20 transition-all checked:bg-[var(--accent)] relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-all checked:before:left-[18px]"
           />
         </label>

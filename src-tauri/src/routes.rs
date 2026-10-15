@@ -1,6 +1,6 @@
 //! Local HTTP API (axum): catalog browsing, detail enrichment, streaming proxy.
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
 
+use crate::adult;
 use crate::embed;
 use crate::m3u;
 use crate::proxy;
@@ -168,19 +169,49 @@ async fn login_m3u(State(app): State<Arc<App>>, Json(req): Json<M3uReq>) -> ApiR
 
 // ---------------- catalog ----------------
 
+/// Category list for `kind`: from the panel (Xtream) or derived from the
+/// catalog (M3U, where the group name doubles as the category id).
+async fn all_categories(app: &Arc<App>, kind: &str) -> Result<Vec<xtream::Category>, ApiError> {
+    if app.is_m3u().await {
+        let items = app.ensure_catalog(kind, false).await?;
+        return Ok(m3u::categories_from(items.as_slice()));
+    }
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    Ok(xtream::categories(&app.client, &s, kind).await?)
+}
+
+/// Ids of the categories that count as adult content for `kind`.
+///
+/// Never fails a request: when the category list cannot be loaded, nothing is
+/// filtered - the page keeps working instead of returning an error.
+async fn adult_category_ids(app: &Arc<App>, kind: &str) -> HashSet<String> {
+    match all_categories(app, kind).await {
+        Ok(cats) => cats
+            .into_iter()
+            .filter(|c| adult::is_adult_category(&c.name))
+            .map(|c| c.id)
+            .collect(),
+        Err(_) => HashSet::new(),
+    }
+}
+
+/// Does the item belong to one of the given (adult) category ids?
+fn in_categories(it: &MediaItem, ids: &HashSet<String>) -> bool {
+    !ids.is_empty() && it.category_id.as_deref().is_some_and(|c| ids.contains(c))
+}
+
 #[derive(Deserialize)]
 struct KindQ {
     kind: String,
+    #[serde(default)]
+    hide_adult: Option<bool>,
 }
 
 async fn categories(State(app): State<Arc<App>>, Query(q): Query<KindQ>) -> ApiResult {
-    if app.is_m3u().await {
-        let items = app.ensure_catalog(&q.kind, false).await?;
-        let cats = m3u::categories_from(items.as_slice());
-        return Ok(Json(json!({ "categories": cats })));
+    let mut cats = all_categories(&app, &q.kind).await?;
+    if q.hide_adult.unwrap_or(true) {
+        cats.retain(|c| !adult::is_adult_category(&c.name));
     }
-    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
-    let cats = xtream::categories(&app.client, &s, &q.kind).await?;
     Ok(Json(json!({ "categories": cats })))
 }
 
@@ -197,14 +228,24 @@ struct BrowseQ {
     page: Option<usize>,
     #[serde(default)]
     page_size: Option<usize>,
+    #[serde(default)]
+    hide_adult: Option<bool>,
 }
 
 async fn browse(State(app): State<Arc<App>>, Query(bq): Query<BrowseQ>) -> ApiResult {
     let items = app.ensure_catalog(&bq.kind, false).await?;
+    let adult_ids = if bq.hide_adult.unwrap_or(true) {
+        adult_category_ids(&app, &bq.kind).await
+    } else {
+        HashSet::new()
+    };
     let q = bq.q.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
     let mut list: Vec<&MediaItem> = items
         .iter()
         .filter(|it| {
+            if in_categories(it, &adult_ids) {
+                return false;
+            }
             if let Some(c) = &bq.category {
                 if it.category_id.as_deref() != Some(c.as_str()) {
                     return false;
@@ -237,28 +278,58 @@ async fn browse(State(app): State<Arc<App>>, Query(bq): Query<BrowseQ>) -> ApiRe
     })))
 }
 
-async fn home(State(app): State<Arc<App>>) -> ApiResult {
+#[derive(Deserialize)]
+struct HomeQ {
+    #[serde(default)]
+    hide_adult: Option<bool>,
+}
+
+async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult {
+    // Looked up in parallel: the filter then costs roughly one extra panel
+    // round-trip instead of three.
+    let (vod_adult, series_adult, live_adult) = if q.hide_adult.unwrap_or(true) {
+        tokio::join!(
+            adult_category_ids(&app, "vod"),
+            adult_category_ids(&app, "series"),
+            adult_category_ids(&app, "live")
+        )
+    } else {
+        (HashSet::new(), HashSet::new(), HashSet::new())
+    };
+
     let vod = app.ensure_catalog("vod", false).await?;
     let series = app.ensure_catalog("series", false).await?;
     let live = app.ensure_catalog("live", false).await?;
 
-    let mut recent: Vec<&MediaItem> = vod.iter().filter(|i| i.cover.is_some()).collect();
+    let mut recent: Vec<&MediaItem> = vod
+        .iter()
+        .filter(|i| i.cover.is_some() && !in_categories(i, &vod_adult))
+        .collect();
     recent.sort_by(|a, b| b.added.unwrap_or(0).cmp(&a.added.unwrap_or(0)));
     let recent: Vec<&MediaItem> = recent.into_iter().take(30).collect();
 
     let mut top: Vec<&MediaItem> = vod
         .iter()
-        .filter(|i| i.rating.unwrap_or(0.0) >= 7.0 && i.cover.is_some())
+        .filter(|i| {
+            i.rating.unwrap_or(0.0) >= 7.0 && i.cover.is_some() && !in_categories(i, &vod_adult)
+        })
         .collect();
     top.sort_by(|a, b| cmp_rating(a, b));
     let hero: Vec<&MediaItem> = top.iter().take(6).copied().collect();
     let top: Vec<&MediaItem> = top.into_iter().take(30).collect();
 
-    let mut s: Vec<&MediaItem> = series.iter().filter(|i| i.cover.is_some()).collect();
+    let mut s: Vec<&MediaItem> = series
+        .iter()
+        .filter(|i| i.cover.is_some() && !in_categories(i, &series_adult))
+        .collect();
     s.sort_by(|a, b| cmp_rating(a, b));
     let series_row: Vec<&MediaItem> = s.into_iter().take(30).collect();
 
-    let live_row: Vec<&MediaItem> = live.iter().take(30).collect();
+    let live_row: Vec<&MediaItem> = live
+        .iter()
+        .filter(|i| !in_categories(i, &live_adult))
+        .take(30)
+        .collect();
 
     let mut rows: Vec<Value> = vec![];
     if !recent.is_empty() {
@@ -277,7 +348,7 @@ async fn home(State(app): State<Arc<App>>) -> ApiResult {
     // category rows for movies
     let mut counts: HashMap<String, usize> = HashMap::new();
     for it in vod.iter() {
-        if it.cover.is_none() {
+        if it.cover.is_none() || in_categories(it, &vod_adult) {
             continue;
         }
         if let Some(c) = &it.category_id {
@@ -292,7 +363,11 @@ async fn home(State(app): State<Arc<App>>) -> ApiResult {
         }
         let mut items: Vec<&MediaItem> = vod
             .iter()
-            .filter(|i| i.category_id.as_deref() == Some(cid.as_str()) && i.cover.is_some())
+            .filter(|i| {
+                i.category_id.as_deref() == Some(cid.as_str())
+                    && i.cover.is_some()
+                    && !in_categories(i, &vod_adult)
+            })
             .collect();
         items.sort_by(|a, b| b.added.unwrap_or(0).cmp(&a.added.unwrap_or(0)));
         items.truncate(24);

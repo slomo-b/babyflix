@@ -1,6 +1,14 @@
 // Typed client for the local BabyFlix backend (Rust/axum on 127.0.0.1:4523).
 
+import { useStore } from "./store";
+
 export const API_BASE = "http://127.0.0.1:4523";
+
+/**
+ * Wert für den `hide_adult`-Parameter der Listen-Endpunkte. Quelle ist die
+ * Einstellung „Erwachseneninhalte" im Store; der Backend-Default ist Ausblenden.
+ */
+const hideAdultParam = () => String(useStore.getState().hideAdult);
 
 export type Kind = "movie" | "series" | "live";
 
@@ -251,7 +259,10 @@ export const api = {
       body: JSON.stringify({ base_url, username, password }),
     }),
 
-  categories: (kind: Kind) => req<{ categories: Category[] }>(`/api/categories?kind=${kind}`),
+  categories: (kind: Kind) =>
+    req<{ categories: Category[] }>(
+      `/api/categories?kind=${kind}&hide_adult=${hideAdultParam()}`
+    ),
   browse: (params: {
     kind: Kind;
     category?: string;
@@ -266,9 +277,10 @@ export const api = {
     if (params.sort) sp.set("sort", params.sort);
     if (params.page) sp.set("page", String(params.page));
     if (params.page_size) sp.set("page_size", String(params.page_size));
+    sp.set("hide_adult", hideAdultParam());
     return req<BrowseResponse>(`/api/browse?${sp.toString()}`);
   },
-  home: () => req<HomeResponse>("/api/home"),
+  home: () => req<HomeResponse>(`/api/home?hide_adult=${hideAdultParam()}`),
   detail: (kind: "movie" | "series", id: string) =>
     req<DetailResponse>(`/api/detail?kind=${kind}&id=${encodeURIComponent(id)}`),
   epg: (streamId: string, full = false, limit = 12, channelId?: string) => {
