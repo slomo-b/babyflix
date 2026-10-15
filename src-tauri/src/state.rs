@@ -5,7 +5,7 @@ use crate::ratings::RatingStore;
 use crate::xtream::{self, Credentials, MediaItem, Session};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,6 +42,9 @@ pub struct App {
     /// video surface is placed relative to both.
     pub host: std::sync::RwLock<Option<crate::embed::Host>>,
     pub window: std::sync::RwLock<Option<tauri::WebviewWindow>>,
+    /// Capability report of the running webview (codec probing happens in the UI,
+    /// because only the webview knows what its platform can decode).
+    pub capabilities: RwLock<Value>,
 }
 
 impl App {
@@ -69,6 +72,7 @@ impl App {
             mpv,
             host: std::sync::RwLock::new(None),
             window: std::sync::RwLock::new(None),
+            capabilities: RwLock::new(Value::Null),
         })
     }
 

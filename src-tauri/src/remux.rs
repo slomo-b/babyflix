@@ -3,7 +3,7 @@
 //! audio codecs are normalised (e.g. DTS/AC3 -> AAC) and all audio tracks are selectable.
 use anyhow::{anyhow, Result};
 use flate2::read::GzDecoder;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,8 @@ pub struct RemuxStart {
     pub token: String,
     pub duration: Option<f64>,
     pub streams: Value,
+    /// What FFmpeg was actually told to do (copy vs transcode) and why.
+    pub decision: Value,
 }
 
 pub struct Remux {
@@ -39,6 +41,9 @@ pub struct Remux {
     ffprobe: RwLock<Option<PathBuf>>,
     sessions: Mutex<HashMap<String, Session>>,
     keys: Mutex<HashMap<String, String>>,
+    /// Decision of the most recently started session - surfaced as a diagnostic
+    /// so a user can see why a stream was transcoded instead of copied.
+    last_decision: RwLock<Option<Value>>,
 }
 
 /// Only relevant on Windows: spawn child processes without a console window.
@@ -53,6 +58,19 @@ pub(crate) fn hidden(cmd: &mut Command) {
     }
     #[cfg(not(windows))]
     let _ = cmd;
+}
+
+/// Which parts of a stream FFmpeg may **copy** instead of re-encoding, given the
+/// source codecs.
+///
+/// This is the single place holding the copy-vs-transcode policy. Phase 1 of
+/// `docs/PLAYER-RESEARCH.md` replaces the hard-coded codec lists here with the
+/// webview's probed capabilities (`/api/capabilities`), so the decision follows
+/// what the platform can really decode instead of a fixed assumption.
+pub(crate) fn copy_actions(vcodec: &str, acodec: Option<&str>) -> (bool, bool) {
+    let video = vcodec == "h264";
+    let audio = matches!(acodec, Some("aac") | Some("mp3"));
+    (video, audio)
 }
 
 /// File name of an executable on this platform (`ffmpeg` vs `ffmpeg.exe`).
@@ -316,6 +334,7 @@ impl Remux {
             ffprobe: RwLock::new(ffprobe),
             sessions: Mutex::new(HashMap::new()),
             keys: Mutex::new(HashMap::new()),
+            last_decision: RwLock::new(None),
         }
     }
 
@@ -420,7 +439,15 @@ impl Remux {
                         .map(streams_from)
                         .unwrap_or_else(|| serde_json::json!({"audio":[],"video":[],"subtitle":[]}));
                     let duration = info.as_ref().and_then(duration_of);
-                    return Ok(RemuxStart { token: tok2, duration, streams });
+                    // The session was started with this exact key, so the recorded
+                    // decision applies to it.
+                    let decision = self
+                        .last_decision
+                        .read()
+                        .unwrap()
+                        .clone()
+                        .unwrap_or(Value::Null);
+                    return Ok(RemuxStart { token: tok2, duration, streams, decision });
                 }
             }
         }
@@ -454,6 +481,20 @@ impl Remux {
         let vcodec = stream_codec(&streams["video"], 0).unwrap_or_else(|| "h264".into());
         let acodec = stream_codec(&streams["audio"], audio.unwrap_or(0));
 
+        // What FFmpeg will be told to do. Recorded for diagnostics: without a test
+        // provider this is the only way to see whether a stream was copied or
+        // re-encoded - and which codec forced the re-encode.
+        let (video_copy, audio_copy) = copy_actions(&vcodec, acodec.as_deref());
+        let decision = json!({
+            "key": key,
+            "video_codec": vcodec,
+            "video": if video_copy { "copy" } else { "transcode" },
+            "audio_codec": acodec,
+            "audio": if audio_copy { "copy" } else { "transcode" },
+            "segments": "mpegts",
+        });
+        *self.last_decision.write().unwrap() = Some(decision.clone());
+
         let token = format!("{:x}{:x}", std::process::id(), now_nanos());
         let dir = self.root.join(&token);
         std::fs::create_dir_all(&dir)?;
@@ -471,18 +512,15 @@ impl Remux {
             .arg("0:v:0")
             .arg("-map")
             .arg(format!("0:a:{}", audio.unwrap_or(0)));
-        if vcodec == "h264" {
+        if video_copy {
             cmd.arg("-c:v").arg("copy");
         } else {
             cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]);
         }
-        match acodec.as_deref() {
-            Some("aac") | Some("mp3") => {
-                cmd.arg("-c:a").arg("copy");
-            }
-            _ => {
-                cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
-            }
+        if audio_copy {
+            cmd.arg("-c:a").arg("copy");
+        } else {
+            cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
         }
         cmd.arg("-sn")
             .args([
@@ -516,7 +554,12 @@ impl Remux {
             },
         );
         self.keys.lock().unwrap().insert(key.to_string(), token.clone());
-        Ok(RemuxStart { token, duration, streams })
+        Ok(RemuxStart { token, duration, streams, decision })
+    }
+
+    /// Decision of the most recently started session (`copy` vs `transcode`).
+    pub fn last_decision(&self) -> Option<Value> {
+        self.last_decision.read().unwrap().clone()
     }
 
     pub fn touch(&self, token: &str) {
@@ -551,5 +594,24 @@ impl Remux {
         for t in dead {
             self.stop(&t);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_actions;
+
+    /// The policy as it stands before the capability probe drives it (Phase 1):
+    /// copy H.264 video and AAC/MP3 audio, re-encode everything else.
+    #[test]
+    fn copies_only_what_the_webview_can_decode() {
+        assert_eq!(copy_actions("h264", Some("aac")), (true, true));
+        assert_eq!(copy_actions("h264", Some("mp3")), (true, true));
+        assert_eq!(copy_actions("h264", Some("ac3")), (true, false));
+        assert_eq!(copy_actions("hevc", Some("aac")), (false, true));
+        assert_eq!(copy_actions("hevc", Some("ac3")), (false, false));
+        assert_eq!(copy_actions("mpeg4", Some("dts")), (false, false));
+        // No audio stream at all: nothing to copy.
+        assert_eq!(copy_actions("h264", None), (true, false));
     }
 }

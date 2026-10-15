@@ -19,6 +19,7 @@ import { useStore } from "../lib/store";
 import { useUpdater } from "../lib/updater";
 import { Lang, localeOf, useLang, useT } from "../lib/i18n";
 import { Select } from "../components/Select";
+import { CapabilitiesCard } from "../components/CapabilitiesCard";
 
 function fmtDate(lang: Lang, ts: unknown): string | null {
   const n = typeof ts === "string" ? parseInt(ts, 10) : typeof ts === "number" ? ts : NaN;
@@ -361,6 +362,8 @@ export default function Settings() {
             </p>
           )}
         </div>
+
+        <CapabilitiesCard caps={health.data?.capabilities} lastRemux={health.data?.last_remux} />
 
         <label className="flex items-center justify-between gap-4 py-3">
           <span className="text-sm">

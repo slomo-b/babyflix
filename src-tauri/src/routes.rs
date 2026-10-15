@@ -73,7 +73,16 @@ async fn health(State(app): State<Arc<App>>) -> Json<Value> {
         "mpv_log": app.mpv.log_path(),
         "mpv_degraded": app.mpv.degraded(),
         "mpv_embed": app.mpv.embed_info(),
+        "capabilities": app.capabilities.read().await.clone(),
+        "last_remux": app.remux.last_decision(),
     }))
+}
+
+/// Capability report of the running webview. The probe has to happen in the UI,
+/// because only the webview knows what its platform can actually decode.
+async fn capabilities_put(State(app): State<Arc<App>>, Json(v): Json<Value>) -> ApiResult {
+    *app.capabilities.write().await = v;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
@@ -861,6 +870,7 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         "audio": res.streams.get("audio").cloned().unwrap_or(Value::Null),
         "video": res.streams.get("video").cloned().unwrap_or(Value::Null),
         "subtitle": res.streams.get("subtitle").cloned().unwrap_or(Value::Null),
+        "decision": res.decision,
     })))
 }
 
@@ -943,6 +953,7 @@ async fn hls_file(
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/capabilities", post(capabilities_put))
         .route("/api/login", post(login))
         .route("/api/login_m3u", post(login_m3u))
         .route("/api/logout", post(logout))

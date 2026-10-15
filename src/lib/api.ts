@@ -125,6 +125,37 @@ export interface SessionResponse {
   allowed_exts?: string[];
 }
 
+/** Support verdict for one codec, as probed in the webview. */
+export interface CodecCapability {
+  /** `MediaSource.isTypeSupported()` (or `canPlayType` without MSE). */
+  mse: boolean;
+  /** `mediaCapabilities.decodingInfo().supported`, null when unavailable. */
+  decode: boolean | null;
+  /** … .powerEfficient - i.e. hardware decoding. */
+  hardware: boolean | null;
+}
+
+/** Codec probe of the running webview, reported to the backend for diagnostics. */
+export interface CapabilitiesReport {
+  probedAt: string;
+  userAgent: string;
+  mediaSource: boolean;
+  mediaCapabilities: boolean;
+  video: Record<string, CodecCapability>;
+  audio: Record<string, CodecCapability>;
+  containers: Record<string, boolean>;
+}
+
+/** What the last FFmpeg remux session did, and which codecs forced it. */
+export interface RemuxDecision {
+  key: string;
+  video_codec: string;
+  video: "copy" | "transcode";
+  audio_codec: string | null;
+  audio: "copy" | "transcode";
+  segments: string;
+}
+
 export interface HealthResponse {
   ok: boolean;
   logged_in: boolean;
@@ -135,6 +166,10 @@ export interface HealthResponse {
   ffprobe?: string | null;
   /** Path of the MPV binary for the native playback engine, or null when missing. */
   mpv?: string | null;
+  /** Codec probe reported by the webview (`POST /api/capabilities`). */
+  capabilities?: CapabilitiesReport | null;
+  /** Decision of the most recent remux session. */
+  last_remux?: RemuxDecision | null;
 }
 
 export interface DiagResult {
@@ -240,6 +275,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => req<HealthResponse>("/api/health"),
+  reportCapabilities: (caps: CapabilitiesReport) =>
+    req<{ ok: boolean }>("/api/capabilities", {
+      method: "POST",
+      body: JSON.stringify(caps),
+    }),
   session: () => req<SessionResponse>("/api/session"),
   login: (base_url: string, username: string, password: string) =>
     req<{ ok: boolean }>("/api/login", {

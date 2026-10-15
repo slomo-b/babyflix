@@ -6,6 +6,7 @@ import { useStore } from "./lib/store";
 import { SCROLL_CONTAINER_ID } from "./lib/useScrollMemory";
 import { useT } from "./lib/i18n";
 import { useUpdater } from "./lib/updater";
+import { reportCapabilities } from "./lib/capabilities";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Player } from "./components/Player";
@@ -44,6 +45,11 @@ export default function App() {
     enabled: !!session.data?.logged_in,
     refetchInterval: 15000,
   });
+
+  // Report which codecs this webview can decode (copy-vs-transcode diagnostics).
+  useEffect(() => {
+    void reportCapabilities().then(() => qc.invalidateQueries({ queryKey: ["health"] }));
+  }, [qc]);
 
   // Check for updates shortly after launch (packaged app only).
   useEffect(() => {
