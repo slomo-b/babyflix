@@ -66,6 +66,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          # The v1.5.3 run died with "other side closed" (the API reset the
+          # socket after a stalled upload) *after* every artefact of that job was
+          # already on the release — a transient network failure, not a build
+          # failure. This retries the build, the release fetch and the uploads.
+          retryAttempts: '3'
           # Publish a GitHub Release on tag pushes. The updater reads
           # /releases/latest/download/latest.json from this (published) release.
           tagName: v__VERSION__
