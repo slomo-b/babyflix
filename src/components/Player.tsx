@@ -139,6 +139,12 @@ export function Player() {
   // remux (FFmpeg) options
   const [remuxAudio, setRemuxAudio] = useState(0);
   const [forceRemux, setForceRemux] = useState(false);
+  /**
+   * Stream that had to be handed to FFmpeg because the panel only delivers raw
+   * MPEG-TS for live. Keyed by stream, so a new channel starts with a direct
+   * attempt again instead of inheriting the fallback.
+   */
+  const [liveRemuxFor, setLiveRemuxFor] = useState<string | null>(null);
 
   // last low-level failure message, shown in the error overlay so a broken stream is debuggable
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -239,7 +245,9 @@ export function Player() {
     const ext = (current.ext || "").toLowerCase();
     const isVod = current.kind !== "live";
     // Always remux VOD so every container/codec plays and all tracks are available.
-    const wantRemux = isVod;
+    // Live is handed to FFmpeg only when the direct attempt failed (`liveRemuxFor`).
+    const liveRemux = !isVod && liveRemuxFor === streamKey;
+    const wantRemux = isVod || liveRemux;
     remuxRef.current = wantRemux;
 
     const directUrl = playerUrl(current.kind, current.id, current.ext);
@@ -313,7 +321,7 @@ export function Player() {
             }
             autoAudioRef.current = true;
           }
-          const res = await api.remux(current.kind, current.id, current.ext, audioIdx);
+          const res = await api.remux(current.kind, current.id, current.ext, audioIdx, liveRemux);
           if (cancelled) {
             api.remuxStop(res.token);
             return;
@@ -345,6 +353,9 @@ export function Player() {
       if (useHls && Hls.isSupported()) {
         setupHls(directUrl, () => {
           if (isVod && !forceRemux) setForceRemux(true);
+          // A panel that only delivers raw MPEG-TS cannot be played by hls.js
+          // directly - hand it to FFmpeg and play its rolling HLS playlist.
+          else if (!isVod && !liveRemux) setLiveRemuxFor(streamKey);
           else setError(true);
         });
       } else {
@@ -438,6 +449,11 @@ export function Player() {
         setForceRemux(true);
         return;
       }
+      // Same for a live stream that only arrives as raw MPEG-TS (no hls.js).
+      if (!isVod && !remuxRef.current && !liveRemux) {
+        setLiveRemuxFor(streamKey);
+        return;
+      }
       const code = video.error?.code;
       setErrorMsg(
         remuxErr ??
@@ -466,7 +482,7 @@ export function Player() {
       if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, remuxAudio, forceRemux, reloadKey]);
+  }, [streamKey, remuxAudio, forceRemux, liveRemuxFor, reloadKey]);
 
   const persist = useCallback(
     (pos: number, dur: number) => {

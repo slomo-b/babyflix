@@ -709,6 +709,9 @@ struct RemuxQ {
     ext: Option<String>,
     #[serde(default)]
     audio: Option<usize>,
+    /// Live pass-through for panels that only deliver raw MPEG-TS.
+    #[serde(default)]
+    live: Option<bool>,
 }
 
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
@@ -739,8 +742,9 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
     };
     let key = format!("{}:{}:{}:{}", q.kind, q.id, ext, q.audio.unwrap_or(0));
     let audio = q.audio;
+    let live = q.live.unwrap_or(false);
     let app2 = app.clone();
-    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps))
+    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps, live))
         .await
         .map_err(|e| ApiError(e.to_string()))?
         .map_err(ApiError::from)?;

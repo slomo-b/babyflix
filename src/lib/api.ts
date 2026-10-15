@@ -297,10 +297,11 @@ export const api = {
       body: JSON.stringify(items),
     }),
   refresh: () => req<{ ok: boolean }>("/api/refresh", { method: "POST" }),
-  remux: (kind: Kind, id: string, ext?: string, audio?: number) => {
+  remux: (kind: Kind, id: string, ext?: string, audio?: number, live?: boolean) => {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);
     if (audio != null) sp.set("audio", String(audio));
+    if (live) sp.set("live", "true");
     return req<{
       token: string;
       playlist: string;

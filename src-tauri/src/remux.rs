@@ -23,6 +23,12 @@ struct Session {
     dir: PathBuf,
     key: String,
     last: Instant,
+    /// Live sessions keep running while the user watches, so they may idle much
+    /// longer than a VOD session without being reaped.
+    live: bool,
+    /// Source URL - reused by the subtitle extraction (W4), so it never has to
+    /// open a second connection just to resolve the stream again.
+    url: String,
 }
 
 pub struct RemuxStart {
@@ -485,6 +491,7 @@ impl Remux {
         url: &str,
         audio: Option<usize>,
         caps: &DecodeCaps,
+        live: bool,
     ) -> Result<RemuxStart> {
         let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
@@ -541,7 +548,12 @@ impl Remux {
             .as_ref()
             .map(streams_from)
             .unwrap_or_else(|| serde_json::json!({"audio":[],"video":[],"subtitle":[]}));
-        let duration = info.as_ref().and_then(duration_of);
+        let duration = if live {
+            // A live stream has no meaningful duration; the UI hides the timeline.
+            None
+        } else {
+            info.as_ref().and_then(duration_of)
+        };
         let vcodec = stream_codec(&streams["video"], 0).unwrap_or_else(|| "h264".into());
         let acodec = stream_codec(&streams["audio"], audio.unwrap_or(0));
 
@@ -587,8 +599,24 @@ impl Remux {
         } else {
             cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
         }
-        cmd.arg("-sn")
-            .args([
+        cmd.arg("-sn");
+        if live {
+            // Live has no end: a rolling window instead of an event playlist, and
+            // old segments are deleted so a long session cannot fill the disk.
+            cmd.args([
+                "-f",
+                "hls",
+                "-hls_time",
+                "2",
+                "-hls_list_size",
+                "6",
+                "-hls_segment_type",
+                "mpegts",
+                "-hls_flags",
+                "delete_segments+omit_endlist+temp_file",
+            ]);
+        } else {
+            cmd.args([
                 "-f",
                 "hls",
                 "-hls_time",
@@ -599,8 +627,9 @@ impl Remux {
                 "mpegts",
                 "-hls_flags",
                 "independent_segments+temp_file",
-            ])
-            .arg("-hls_segment_filename")
+            ]);
+        }
+        cmd.arg("-hls_segment_filename")
             .arg(dir.join("seg_%05d.ts"))
             .arg(dir.join("index.m3u8"))
             .stdin(Stdio::null())
@@ -616,6 +645,8 @@ impl Remux {
                 dir,
                 key: key.to_string(),
                 last: Instant::now(),
+                live,
+                url: url.to_string(),
             },
         );
         self.keys.lock().unwrap().insert(key.to_string(), token.clone());
@@ -652,7 +683,12 @@ impl Remux {
         let dead: Vec<String> = {
             let s = self.sessions.lock().unwrap();
             s.iter()
-                .filter(|(_, v)| now.duration_since(v.last) > Duration::from_secs(120))
+                .filter(|(_, v)| {
+                    // A live stream may legitimately sit without requests (paused),
+                    // so it gets a far longer leash than an abandoned VOD session.
+                    let limit = if v.live { 1800 } else { 120 };
+                    now.duration_since(v.last) > Duration::from_secs(limit)
+                })
                 .map(|(k, _)| k.clone())
                 .collect()
         };
