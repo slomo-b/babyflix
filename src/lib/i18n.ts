@@ -143,6 +143,7 @@ const de: Record<string, string> = {
 
   // detail
   "detail.firstEpisode": "Erste Folge",
+  "detail.randomEpisode": "Zufällige Folge",
   "detail.noEpisodes": "Keine Folgen",
   "detail.lastWatched": "Zuletzt gesehen",
   "detail.continueWith": "Weiterschauen: {ep}",
@@ -404,6 +405,7 @@ const en: Record<string, string> = {
   "search.noResults": "No results for “{q}”.",
 
   "detail.firstEpisode": "First episode",
+  "detail.randomEpisode": "Random episode",
   "detail.noEpisodes": "No episodes",
   "detail.lastWatched": "Last watched",
   "detail.continueWith": "Resume: {ep}",

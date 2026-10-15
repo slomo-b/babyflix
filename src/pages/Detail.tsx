@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Film, Heart, Info, Play, Star, X } from "lucide-react";
+import { ArrowLeft, Film, Heart, Info, Play, Shuffle, Star, X } from "lucide-react";
 import { api, imgUrl, Episode } from "../lib/api";
 import { useStore } from "../lib/store";
 import { fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
@@ -177,6 +177,19 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
 
   const firstEpisode = flatEpisodes[0];
 
+  /**
+   * Spielt eine zufällige Folge der Serie. Die zuletzt gesehene Folge wird dabei
+   * ausgelassen, solange es mindestens eine Alternative gibt.
+   */
+  const playRandomEpisode = () => {
+    if (!flatEpisodes.length) return;
+    const pool =
+      flatEpisodes.length > 1 && lastWatchedEp
+        ? flatEpisodes.filter((e) => e.id !== lastWatchedEp.id)
+        : flatEpisodes;
+    playEpisode(pool[Math.floor(Math.random() * pool.length)]);
+  };
+
   if (query.isLoading) {
     return (
       <div className="animate-fade-in">
@@ -333,6 +346,15 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                       ? t("detail.firstEpisode")
                       : t("detail.noEpisodes")}
                 </span>
+              </button>
+            )}
+
+            {flatEpisodes.length > 0 && (
+              <button
+                className="btn btn-ghost w-full py-3.5 text-base"
+                onClick={playRandomEpisode}
+              >
+                <Shuffle size={17} /> {t("detail.randomEpisode")}
               </button>
             )}
 
