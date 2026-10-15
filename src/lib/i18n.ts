@@ -106,6 +106,9 @@ const de: Record<string, string> = {
   // catalog
   "catalog.filter": "Filtern…",
   "catalog.searchCategories": "Kategorien suchen…",
+  "catalog.categories": "Kategorien",
+  "catalog.showCategories": "Kategorien einblenden",
+  "catalog.hideCategories": "Kategorien ausblenden",
   "catalog.sort.added": "Zuletzt hinzugefügt",
   "catalog.sort.name": "Name (A–Z)",
   "catalog.sort.rating": "Bewertung",
@@ -374,6 +377,9 @@ const en: Record<string, string> = {
 
   "catalog.filter": "Filter…",
   "catalog.searchCategories": "Search categories…",
+  "catalog.categories": "Categories",
+  "catalog.showCategories": "Show categories",
+  "catalog.hideCategories": "Hide categories",
   "catalog.sort.added": "Recently added",
   "catalog.sort.name": "Name (A–Z)",
   "catalog.sort.rating": "Rating",

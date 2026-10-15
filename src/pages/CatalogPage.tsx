@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search as SearchIcon } from "lucide-react";
-import { api, Category, Kind, MediaItem } from "../lib/api";
+import { api, Kind, MediaItem } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { MediaCard } from "../components/MediaCard";
+import { CategorySidebar } from "../components/CategorySidebar";
 import { GridSkeleton } from "../components/Skeletons";
 import { Select } from "../components/Select";
 import { useOpen } from "../lib/useOpen";
@@ -24,7 +25,6 @@ export function CatalogPage({
   const [category, setCategory] = useState(params.get("category") ?? "");
   const [sort, setSort] = useState("added");
   const [search, setSearch] = useState("");
-  const [catQuery, setCatQuery] = useState("");
   const { open } = useOpen();
   const sentinel = useRef<HTMLDivElement>(null);
 
@@ -57,13 +57,6 @@ export function CatalogPage({
     getNextPageParam: (last, pages) =>
       pages.length * last.page_size < last.total ? last.page + 1 : undefined,
   });
-
-  const filteredCats = useMemo(() => {
-    const q = catQuery.trim().toLowerCase();
-    const all = cats.data?.categories ?? [];
-    if (!q) return all;
-    return all.filter((c) => c.name.toLowerCase().includes(q));
-  }, [cats.data, catQuery]);
 
   const items: MediaItem[] = useMemo(
     () => query.data?.pages.flatMap((p) => p.items) ?? [],
@@ -132,67 +125,44 @@ export function CatalogPage({
         </div>
       </div>
 
-      <div className="mb-3 flex items-center gap-3">
-        <div className="relative w-72 max-w-full">
-          <SearchIcon
-            size={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]"
-          />
-          <input
-            value={catQuery}
-            onChange={(e) => setCatQuery(e.target.value)}
-            placeholder={t("catalog.searchCategories")}
-            className="w-full rounded-xl border border-[var(--border)] bg-white/5 py-2 pl-9 pr-3 text-sm outline-none focus:border-[var(--accent)]"
-          />
+      <div className="flex items-start gap-5">
+        <CategorySidebar
+          categories={cats.data?.categories ?? []}
+          value={category}
+          onChange={pickCategory}
+          allLabel={t("common.all")}
+          loading={cats.isLoading}
+        />
+
+        <div className="min-w-0 flex-1">
+          {query.isLoading ? (
+            <GridSkeleton />
+          ) : items.length === 0 ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-white/5 p-10 text-center text-sm text-[var(--muted)]">
+              {t("catalog.empty")}
+            </div>
+          ) : (
+            <>
+              <div
+                className="grid gap-4"
+                style={{ gridTemplateColumns: "repeat(auto-fill,minmax(158px,1fr))" }}
+              >
+                {items.map((item) => (
+                  <MediaCard key={item.id} item={item} width="100%" onClick={() => open(item)} />
+                ))}
+              </div>
+
+              <div ref={sentinel} className="py-10 text-center text-xs text-[var(--muted)]">
+                {query.isFetchingNextPage
+                  ? t("catalog.loadingMore")
+                  : query.hasNextPage
+                  ? t("catalog.scrollMore")
+                  : t("catalog.end")}
+              </div>
+            </>
+          )}
         </div>
-        <span className="text-xs text-[var(--muted)]">{filteredCats.length}</span>
       </div>
-
-      <div className="no-scrollbar -mx-1 mb-6 flex gap-2 overflow-x-auto px-1 pb-1">
-        <button className="chip" data-active={category === ""} onClick={() => pickCategory("")}>
-          {t("common.all")}
-        </button>
-        {filteredCats.map((c: Category) => (
-          <button
-            key={c.id}
-            className="chip"
-            data-active={category === c.id}
-            onClick={() => pickCategory(c.id)}
-          >
-            {c.name}
-          </button>
-        ))}
-        {filteredCats.length === 0 && (
-          <span className="px-2 py-1.5 text-xs text-[var(--muted)]">—</span>
-        )}
-      </div>
-
-      {query.isLoading ? (
-        <GridSkeleton />
-      ) : items.length === 0 ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-white/5 p-10 text-center text-sm text-[var(--muted)]">
-          {t("catalog.empty")}
-        </div>
-      ) : (
-        <>
-          <div
-            className="grid gap-4"
-            style={{ gridTemplateColumns: "repeat(auto-fill,minmax(158px,1fr))" }}
-          >
-            {items.map((item) => (
-              <MediaCard key={item.id} item={item} width="100%" onClick={() => open(item)} />
-            ))}
-          </div>
-
-          <div ref={sentinel} className="py-10 text-center text-xs text-[var(--muted)]">
-            {query.isFetchingNextPage
-              ? t("catalog.loadingMore")
-              : query.hasNextPage
-              ? t("catalog.scrollMore")
-              : t("catalog.end")}
-          </div>
-        </>
-      )}
     </div>
   );
 }

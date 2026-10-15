@@ -6,7 +6,7 @@ import { useStore } from "../lib/store";
 import { fmtTime, initials, initialsColor } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { GridSkeleton } from "../components/Skeletons";
-import { Select } from "../components/Select";
+import { CategorySidebar } from "../components/CategorySidebar";
 import { useScrollMemory } from "../lib/useScrollMemory";
 
 export default function Live() {
@@ -73,17 +73,6 @@ export default function Live() {
       </div>
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <Select
-          value={category}
-          onChange={setCategory}
-          ariaLabel={t("live.allCategories")}
-          className="w-56"
-          searchable
-          options={[
-            { value: "", label: t("live.allCategories") },
-            ...(cats.data?.categories ?? []).map((c) => ({ value: c.id, label: c.name })),
-          ]}
-        />
         <div className="relative">
           <SearchIcon
             size={15}
@@ -99,6 +88,14 @@ export default function Live() {
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
+        <CategorySidebar
+          categories={cats.data?.categories ?? []}
+          value={category}
+          onChange={setCategory}
+          allLabel={t("live.allCategories")}
+          loading={cats.isLoading}
+        />
+
         <div className="min-w-0 flex-1">
           {channels.isLoading ? (
             <GridSkeleton count={12} />

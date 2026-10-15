@@ -78,6 +78,10 @@ interface AppStore {
   hideAdult: boolean;
   setHideAdult: (v: boolean) => void;
 
+  /** Kategorie-Sidebar (Filme/Serien/Live) aufgeklappt? Standard: ja. */
+  categorySidebarOpen: boolean;
+  setCategorySidebarOpen: (v: boolean) => void;
+
   /** Wiedergabe-Engine: "mpv" = native MPV-Engine (Hauptweg, im App-Fenster
    *  eingebettet), "web" = hls.js-Webview als Rückfallebene ohne MPV. */
   playerEngine: "web" | "mpv";
@@ -122,6 +126,9 @@ export const useStore = create<AppStore>()(
       hideAdult: true,
       setHideAdult: (v) => set({ hideAdult: v }),
 
+      categorySidebarOpen: true,
+      setCategorySidebarOpen: (v) => set({ categorySidebarOpen: v }),
+
       playerEngine: "mpv",
       setPlayerEngine: (v) => set({ playerEngine: v }),
 
@@ -148,6 +155,7 @@ export const useStore = create<AppStore>()(
         autoplayNext: s.autoplayNext,
         autoResume: s.autoResume,
         hideAdult: s.hideAdult,
+        categorySidebarOpen: s.categorySidebarOpen,
         playerEngine: s.playerEngine,
         savedLogin: s.savedLogin,
       }),
