@@ -1,6 +1,39 @@
 import { useEffect } from "react";
 
 /**
+ * ID des scrollenden Containers (siehe `App.tsx`).
+ *
+ * Die App scrollt **nicht** im Fenster, sondern in einem inneren `<div>` mit
+ * `overflow-y-auto`. `window.scrollY` ist dort immer 0 und `window.scrollTo`
+ * wirkungslos - deshalb muss die Position am Container gelesen und gesetzt
+ * werden.
+ */
+export const SCROLL_CONTAINER_ID = "app-scroll";
+
+/** Das scrollende Element - oder `null`, wenn doch das Fenster scrollt. */
+function scroller(): HTMLElement | null {
+  return document.getElementById(SCROLL_CONTAINER_ID);
+}
+
+function scrollPosition(): number {
+  const el = scroller();
+  return el ? el.scrollTop : window.scrollY;
+}
+
+function maxScroll(): number {
+  const el = scroller();
+  return el
+    ? Math.max(0, el.scrollHeight - el.clientHeight)
+    : Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+}
+
+function scrollToY(top: number) {
+  const el = scroller();
+  if (el) el.scrollTo({ top });
+  else window.scrollTo({ top });
+}
+
+/**
  * Merkt sich die Scrollposition der Seite pro Route.
  *
  * Ohne das springt die Liste (Filme/Serien/Suche/Live) bei jedem Rückweg aus
@@ -10,19 +43,57 @@ import { useEffect } from "react";
  * wiederhergestellt.
  */
 export function useScrollMemory(key: string) {
-  // Beim Verlassen die aktuelle Position sichern.
+  // Fortlaufend sichern – bewusst **nicht** erst beim Verlassen: Beim Wechsel
+  // in die Detailansicht schrumpft der Inhalt der Liste, und der Browser
+  // klemmt `scrollTop` schon vor dem Aufräumen nach oben. Ein erst dann
+  // gelesener Wert wäre also längst falsch.
   useEffect(() => {
-    const onLeave = () => {
+    const slot = `babyflix-scroll:${key}`;
+    let letzteSchreibung = 0;
+    let timer: number | null = null;
+
+    const schreiben = () => {
+      letzteSchreibung = Date.now();
       try {
-        sessionStorage.setItem(`babyflix-scroll:${key}`, String(window.scrollY));
+        sessionStorage.setItem(slot, String(scrollPosition()));
       } catch {
         /* Speicher voll oder gesperrt – dann eben ohne */
       }
     };
-    window.addEventListener("beforeunload", onLeave);
+
+    // Gedrosselt auf 100 ms, aber immer mit dem letzten Wert (Trailing).
+    const onScroll = () => {
+      const warten = 100 - (Date.now() - letzteSchreibung);
+      if (warten <= 0) {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        schreiben();
+      } else if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          schreiben();
+        }, warten);
+      }
+    };
+
+    // Beim Drücken steht die Liste noch – der letzte Moment für eine exakte
+    // Position, bevor der Klick in die Detailansicht navigiert.
+    const onPointerDown = () => schreiben();
+
+    const ziel = scroller() ?? window;
+    ziel.addEventListener("scroll", onScroll, { passive: true });
+    ziel.addEventListener("pointerdown", onPointerDown, { passive: true });
+    window.addEventListener("beforeunload", schreiben);
+
     return () => {
-      window.removeEventListener("beforeunload", onLeave);
-      onLeave();
+      // Keinen Nachzügler mehr schreiben lassen – der liefe gegen den bereits
+      // geschrumpften Inhalt der nächsten Seite.
+      if (timer !== null) clearTimeout(timer);
+      ziel.removeEventListener("scroll", onScroll);
+      ziel.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("beforeunload", schreiben);
     };
   }, [key]);
 
@@ -44,8 +115,7 @@ export function useScrollMemory(key: string) {
     const timer = versuche.map((ms) =>
       setTimeout(() => {
         if (abbruch) return;
-        const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-        window.scrollTo({ top: Math.min(ziel, max) });
+        scrollToY(Math.min(ziel, maxScroll()));
       }, ms)
     );
     return () => {

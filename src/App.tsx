@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Route, Routes } from "react-router-dom";
 import { api } from "./lib/api";
 import { useStore } from "./lib/store";
+import { SCROLL_CONTAINER_ID } from "./lib/useScrollMemory";
 import { useT } from "./lib/i18n";
 import { useUpdater } from "./lib/updater";
 import { Sidebar } from "./components/Sidebar";
@@ -77,7 +78,7 @@ export default function App() {
       <Sidebar user={(ui.username as string) ?? null} status={(ui.status as string) ?? null} />
       <main className="flex min-w-0 flex-1 flex-col">
         <Topbar health={health.data} />
-        <div className="flex-1 overflow-y-auto px-8 pb-6">
+        <div id={SCROLL_CONTAINER_ID} className="flex-1 overflow-y-auto px-8 pb-6">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/movies" element={<Movies />} />
