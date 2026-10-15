@@ -7,7 +7,7 @@ import { Hero } from "../components/Hero";
 import { Row } from "../components/Row";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { useOpen } from "../lib/useOpen";
-import { useStore, HistoryItem } from "../lib/store";
+import { useStore, HistoryItem, seriesIdsByTitle, historyGroupKey } from "../lib/store";
 import { useT } from "../lib/i18n";
 
 function ContinueCard({
@@ -68,8 +68,24 @@ export default function Home() {
   const cats = useQuery({ queryKey: ["cats", "movie"], queryFn: () => api.categories("movie") });
   const { open, playItem } = useOpen();
   const history = useStore((s) => s.history);
-  const removeHistory = useStore((s) => s.removeHistory);
+  const removeHistoryGroup = useStore((s) => s.removeHistoryGroup);
   const play = useStore((s) => s.play);
+
+  // Nur die zuletzt gesehene Folge je Serie zeigen. Der Verlauf selbst bleibt
+  // vollständig - die Detailansicht braucht ihn für ihre Fortschrittsbalken.
+  const continueItems = useMemo(() => {
+    const ids = seriesIdsByTitle(history);
+    const seen = new Set<string>();
+    const out: HistoryItem[] = [];
+    for (const h of history) {
+      const gruppe = historyGroupKey(h, ids);
+      if (seen.has(gruppe)) continue;
+      seen.add(gruppe);
+      out.push(h);
+      if (out.length >= 12) break;
+    }
+    return out;
+  }, [history]);
 
   const catName = useMemo(() => {
     const m = new Map<string, string>();
@@ -107,11 +123,11 @@ export default function Home() {
     <div className="animate-fade-in pt-6">
       <Hero items={data.hero} onPlay={playItem} onOpen={open} />
 
-      {history.length > 0 && (
+      {continueItems.length > 0 && (
         <section className="mb-9">
           <h2 className="mb-4 text-lg font-bold tracking-tight">{t("home.continue")}</h2>
           <div className="scroll-x no-scrollbar">
-            {history.slice(0, 12).map((h) => (
+            {continueItems.map((h) => (
               <ContinueCard
                 key={h.key}
                 h={h}
@@ -126,7 +142,7 @@ export default function Home() {
                     historyKey: h.key,
                   })
                 }
-                onRemove={() => removeHistory(h.key)}
+                onRemove={() => removeHistoryGroup(h)}
               />
             ))}
           </div>

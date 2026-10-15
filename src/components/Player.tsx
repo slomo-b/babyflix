@@ -476,6 +476,7 @@ export function Player() {
         kind: current.kind,
         id: current.id,
         ext: current.ext,
+        seriesId: current.seriesId,
         title: current.title,
         poster: current.poster,
         subtitle: current.subtitle,

@@ -404,6 +404,7 @@ export function PlayerShell() {
         kind: c.kind,
         id: c.id,
         ext: c.ext,
+        seriesId: c.seriesId,
         title: c.title,
         poster: c.poster,
         subtitle: c.subtitle,

@@ -30,12 +30,33 @@ export interface HistoryItem {
   kind: "movie" | "series" | "live";
   id: string;
   ext?: string;
+  /** Bei Serien: ID der Serie (nicht der Folge) - gruppiert alle Folgen zu einem Regal-Eintrag. */
+  seriesId?: string;
   title: string;
   poster?: string;
   subtitle?: string;
   position: number;
   duration: number;
   updatedAt: number;
+}
+
+/** Titel -> Serien-ID, für Einträge, die schon eine ID tragen. */
+export function seriesIdsByTitle(history: HistoryItem[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const h of history) if (h.seriesId) map.set(h.title, h.seriesId);
+  return map;
+}
+
+/**
+ * Gruppenschlüssel eines Verlaufs-Eintrags: alle Folgen einer Serie teilen sich
+ * einen Schlüssel, Filme und Sender bleiben jeweils für sich.
+ *
+ * Ältere Einträge kennen noch keine `seriesId` – sie werden über den Titel
+ * zugeordnet, damit auch bereits vorhandene Verläufe gruppiert werden.
+ */
+export function historyGroupKey(h: HistoryItem, idsByTitle: Map<string, string>): string {
+  if (h.kind !== "series") return h.key;
+  return `series:${h.seriesId ?? idsByTitle.get(h.title) ?? h.title}`;
 }
 
 export interface FavoriteItem {
@@ -66,6 +87,8 @@ interface AppStore {
   history: HistoryItem[];
   saveHistory: (h: HistoryItem) => void;
   removeHistory: (key: string) => void;
+  /** Alle Folgen einer Serie (bzw. den Eintrag selbst) aus dem Verlauf entfernen. */
+  removeHistoryGroup: (h: HistoryItem) => void;
   clearHistory: () => void;
 
   autoResume: boolean;
@@ -115,6 +138,16 @@ export const useStore = create<AppStore>()(
           return { history: [h, ...rest].slice(0, 60) };
         }),
       removeHistory: (key) => set((s) => ({ history: s.history.filter((x) => x.key !== key) })),
+  /**
+   * Ganze Gruppe entfernen: bei einer Serie also alle Folgen. Sonst würde nach
+   * dem Entfernen sofort die vorherige Folge im Regal auftauchen.
+   */
+  removeHistoryGroup: (h) =>
+    set((s) => {
+      const ids = seriesIdsByTitle(s.history);
+      const gruppe = historyGroupKey(h, ids);
+      return { history: s.history.filter((x) => historyGroupKey(x, ids) !== gruppe) };
+    }),
       clearHistory: () => set({ history: [] }),
 
       autoResume: true,
