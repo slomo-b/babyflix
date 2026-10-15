@@ -165,15 +165,15 @@ on Windows) and drop `libx264` — that yields an LGPL-compatible FFmpeg without
 
 | Phase | Content | Status |
 |---|---|---|
-| 0 | W1 capability probe + W8 diagnostics only — no behaviour change | **done** (`feat(player): Phase 0`) |
-| 1 | W2 copy-first + fMP4; W6 single connection | open — the actual win |
-| 2 | W3 multi-audio, W4 subtitles, W5 live remux | open — **W4 and W5 are parity gaps** now that mpv is gone |
+| 0 | W1 capability probe + W8 diagnostics only — no behaviour change | **done** |
+| 1 | W2 copy-first + fMP4; W6 single connection | **W2 done**; fMP4 (W2 rest) and W6 open |
+| 2 | W3 multi-audio, W4 subtitles, W5 live remux | **W4 + W5 done**; W3 open (audio switching works, but still restarts FFmpeg per track) |
 | 3 | W7 delete the mpv path and unify the UI | **done** (~3500 lines removed) |
 
-Phase 3 landed before Phase 1/2, so on the current branch three capabilities that mpv used to
-provide are temporarily missing and must land before a release: subtitles (W4), live streams that
-only arrive as raw MPEG-TS (W5), and copy-instead-of-transcode for AC-3/E-AC-3 (W2). Nothing is
-released until that is settled.
+The parity gaps that mpv's removal left behind are closed: subtitles (W4, variant A — a
+dedicated FFmpeg run, accepting a second connection, with graceful fallback) and live streams that
+only arrive as raw MPEG-TS (W5, an on-demand FFmpeg live remux). Remaining: fMP4 segments, the
+single-connection probe (W6) and multi-audio in one session (W3).
 
 
 ## 11. Appendix — current architecture (as found)

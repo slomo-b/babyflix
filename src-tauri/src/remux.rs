@@ -698,6 +698,69 @@ impl Remux {
     }
 }
 
+/// One subtitle track extracted next to a running session's segments.
+pub struct SubTrack {
+    pub index: usize,
+    pub file: String,
+}
+
+impl Remux {
+    /// Extract the given subtitle streams of a running session to WebVTT.
+    ///
+    /// This is a **second** FFmpeg run and therefore a second upstream connection -
+    /// the deliberate trade-off of variant A in `docs/PLAYER-RESEARCH.md`:
+    /// complete subtitles right away, instead of a WebVTT that only fills up as
+    /// the film plays. If it fails, playback simply continues without subtitles.
+    ///
+    /// Blocking - call it from `spawn_blocking`.
+    pub fn extract_subs(&self, token: &str, indices: &[usize]) -> Result<Vec<SubTrack>> {
+        if indices.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (dir, url) = {
+            let sessions = self.sessions.lock().unwrap();
+            let s = sessions
+                .get(token)
+                .ok_or_else(|| anyhow!("no running session for this token"))?;
+            (s.dir.clone(), s.url.clone())
+        };
+        let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
+
+        let mut tracks = Vec::with_capacity(indices.len());
+        let mut cmd = Command::new(&ffmpeg);
+        cmd.arg("-hide_banner")
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-nostdin")
+            .arg("-y")
+            .arg("-user_agent")
+            .arg(UA)
+            .arg("-i")
+            .arg(&url);
+        for &i in indices {
+            let file = format!("sub_{i}.vtt");
+            cmd.arg("-map")
+                .arg(format!("0:s:{i}"))
+                .arg("-c:s")
+                .arg("webvtt")
+                .arg("-f")
+                .arg("webvtt")
+                .arg(dir.join(&file));
+            tracks.push(SubTrack { index: i, file });
+        }
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        hidden(&mut cmd);
+
+        let status = cmd
+            .status()
+            .map_err(|e| anyhow!("ffmpeg subtitle run failed: {e}"))?;
+        if !status.success() {
+            return Err(anyhow!("ffmpeg could not extract subtitles"));
+        }
+        Ok(tracks)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{copy_actions, DecodeCaps};

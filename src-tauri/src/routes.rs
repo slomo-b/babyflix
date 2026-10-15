@@ -770,6 +770,37 @@ async fn remux_stop(State(app): State<Arc<App>>, Query(q): Query<StopQ>) -> Json
 }
 
 #[derive(Deserialize)]
+struct SubsReq {
+    /// Token of the running remux session; the WebVTT files are written next to
+    /// its segments so they disappear together with the session.
+    token: String,
+    /// Subtitle stream indices to extract (text codecs only).
+    indices: Vec<usize>,
+}
+
+/// Extract text subtitle streams of a running session to WebVTT (workstream W4).
+async fn subs_start(State(app): State<Arc<App>>, Json(q): Json<SubsReq>) -> ApiResult {
+    let token = q.token;
+    let indices = q.indices;
+    let app2 = app.clone();
+    let t2 = token.clone();
+    let tracks = tokio::task::spawn_blocking(move || app2.remux.extract_subs(&t2, &indices))
+        .await
+        .map_err(|e| ApiError(e.to_string()))?
+        .map_err(ApiError::from)?;
+    let tracks: Vec<Value> = tracks
+        .into_iter()
+        .map(|t| {
+            json!({
+                "index": t.index,
+                "url": format!("/api/hls/{}/{}", token, t.file),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "tracks": tracks })))
+}
+
+#[derive(Deserialize)]
 struct StreamsQ {
     kind: String,
     id: String,
@@ -855,6 +886,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/player", get(player))
         .route("/api/remux", get(remux_start))
         .route("/api/remux/stop", get(remux_stop))
+        .route("/api/subs", post(subs_start))
         .route("/api/streams", get(streams))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))

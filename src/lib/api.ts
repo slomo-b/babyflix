@@ -313,6 +313,16 @@ export const api = {
   },
   remuxStop: (token: string) =>
     req<{ ok: boolean }>(`/api/remux/stop?token=${encodeURIComponent(token)}`).catch(() => ({ ok: false })),
+  /**
+   * Lässt Text-Untertitel des laufenden Films nach WebVTT extrahieren. Das ist
+   * ein zweiter FFmpeg-Lauf (zweite Verbindung) – siehe `docs/PLAYER-RESEARCH.md`,
+   * Variante A. Schlägt er fehl, läuft der Film einfach ohne Untertitel weiter.
+   */
+  subs: (token: string, indices: number[]) =>
+    req<{ tracks: { index: number; url: string }[] }>("/api/subs", {
+      method: "POST",
+      body: JSON.stringify({ token, indices }),
+    }),
   streams: (kind: Kind, id: string, ext?: string) => {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);

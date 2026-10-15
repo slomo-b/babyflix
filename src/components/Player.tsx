@@ -64,6 +64,16 @@ function isGermanTrack(lang?: string | null, title?: string | null): boolean {
 /** Countdown am Folgenende, bevor automatisch die nächste Folge startet. */
 const END_COUNTDOWN = 10;
 
+/**
+ * Menü-Indizes ab hier gehören zu den aus dem Film extrahierten Untertiteln,
+ * nicht zu den Spuren, die hls.js aus dem Manifest kennt.
+ */
+const NATIVE_SUB_BASE = 100;
+
+/** Text-Untertitel-Codecs, die FFmpeg nach WebVTT wandeln kann. */
+const TEXT_SUB_CODECS =
+  /^(subrip|srt|ass|ssa|mov_text|webvtt|text|microdvd|jacosub|sami|stl|subviewer|vtt)/i;
+
 /** Zeitleiste: klemmt ein Sprungziel in den tatsächlich spulbaren Bereich. */
 function clampToSeekable(v: HTMLVideoElement, t: number, dur: number): number {
   let target = Math.min(Math.max(0, t), Math.max(0, dur - 0.5));
@@ -133,6 +143,12 @@ export function Player() {
   const [audioIndex, setAudioIndex] = useState(-1);
   const [subtitleTracks, setSubtitleTracks] = useState<TrackInfo[]>([]);
   const [subtitleIndex, setSubtitleIndex] = useState(-1);
+  /**
+   * Aus dem Film extrahierte Text-Untertitel (WebVTT). Sie werden als echte
+   * `<track>`-Elemente angehängt; Indizes im Menü liegen deshalb ab
+   * `NATIVE_SUB_BASE`, damit sie mit den hls.js-Spuren nicht kollidieren.
+   */
+  const [subTrax, setSubTrax] = useState<{ url: string; label: string; lang?: string }[]>([]);
   const [levels, setLevels] = useState<LevelInfo[]>([]);
   const [levelIndex, setLevelIndex] = useState(-1);
 
@@ -237,6 +253,7 @@ export function Player() {
     setPosition(0);
     setDuration(0);
     resetTracks();
+    setSubTrax([]);
     cleanup();
     let cancelled = false;
     let sessionToken: string | null = null;
@@ -339,6 +356,31 @@ export function Player() {
           }
           setAudioIndex(audioIdx);
           if (res.duration && res.duration > 0) setDuration(res.duration);
+
+          // Text-Untertitel separat nach WebVTT holen (W4, Variante A). Bewusst
+          // ohne await: die Wiedergabe startet sofort, die Untertitel kommen nach.
+          const textSubs = res.subtitle.filter(
+            (s) => s.codec && s.index != null && TEXT_SUB_CODECS.test(s.codec)
+          );
+          if (textSubs.length) {
+            api
+              .subs(
+                res.token,
+                textSubs.map((s) => s.index as number)
+              )
+              .then((subs) => {
+                if (cancelled) return;
+                setSubTrax(
+                  subs.tracks.map((track, i) => ({
+                    url: track.url,
+                    label: textSubs[i]?.title || textSubs[i]?.lang || `Untertitel ${i + 1}`,
+                    lang: textSubs[i]?.lang ?? undefined,
+                  }))
+                );
+              })
+              .catch(() => undefined); // ohne Untertitel weiterspielen
+          }
+
           setupHls(API_BASE + res.playlist, () => setError(true));
           return;
         } catch (err) {
@@ -721,18 +763,15 @@ export function Player() {
     }
   };
   const selectSubtitle = (i: number) => {
-    if (hlsRef.current) {
-      hlsRef.current.subtitleTrack = i;
-      setSubtitleIndex(i);
-    } else {
-      const v = videoRef.current;
-      if (v) {
-        for (let k = 0; k < v.textTracks.length; k++) {
-          v.textTracks[k].mode = k === i ? "showing" : "disabled";
-        }
-      }
-      setSubtitleIndex(i);
-    }
+    const v = videoRef.current;
+    // Indizes ab NATIVE_SUB_BASE gehören zu den extrahierten <track>-Elementen.
+    const native = i >= NATIVE_SUB_BASE ? i - NATIVE_SUB_BASE : -1;
+    if (hlsRef.current) hlsRef.current.subtitleTrack = native === -1 ? i : -1;
+    v?.querySelectorAll("track").forEach((el, k) => {
+      const tt = (el as HTMLTrackElement).track;
+      if (tt) tt.mode = k === native ? "showing" : "disabled";
+    });
+    setSubtitleIndex(i);
   };
   const selectLevel = (i: number) => {
     if (hlsRef.current) {
@@ -850,7 +889,8 @@ export function Player() {
   const isLive = current.kind === "live";
   const totalSecs = duration > 0 ? duration : durRef.current;
   const pct = totalSecs > 0 ? (position / totalSecs) * 100 : 0;
-  const hasTracks = audioTracks.length > 1 || subtitleTracks.length > 0 || levels.length > 1;
+  const hasTracks =
+    audioTracks.length > 1 || subtitleTracks.length > 0 || subTrax.length > 0 || levels.length > 1;
   // Zeitleiste: beim Ziehen/Hovern zeigt sie die Vorschau-Position.
   const previewSecs = hoverPct !== null ? hoverPct * totalSecs : null;
   const barPct = previewSecs !== null && totalSecs > 0 ? (previewSecs / totalSecs) * 100 : pct;
@@ -893,7 +933,19 @@ export function Player() {
           setPlaying(true);
         }}
         playsInline
-      />
+      >
+        {subTrax.map((s, i) => (
+          <track
+            key={s.url}
+            kind="subtitles"
+            src={API_BASE + s.url}
+            label={s.label}
+            srcLang={s.lang || "und"}
+            default={false}
+            data-native-sub={NATIVE_SUB_BASE + i}
+          />
+        ))}
+      </video>
 
       {loading && !error && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -999,7 +1051,7 @@ export function Player() {
             </TrackGroup>
           )}
 
-          {subtitleTracks.length > 0 && (
+          {(subtitleTracks.length > 0 || subTrax.length > 0) && (
             <TrackGroup title={t("player.subtitles")}>
               <TrackRow active={subtitleIndex === -1} onClick={() => selectSubtitle(-1)}>
                 {t("player.subtitleOff")}
@@ -1007,6 +1059,16 @@ export function Player() {
               {subtitleTracks.map((s, i) => (
                 <TrackRow key={i} active={i === subtitleIndex} onClick={() => selectSubtitle(i)}>
                   {s.name}
+                  {langName(s.lang) ? ` (${langName(s.lang)})` : ""}
+                </TrackRow>
+              ))}
+              {subTrax.map((s, i) => (
+                <TrackRow
+                  key={s.url}
+                  active={NATIVE_SUB_BASE + i === subtitleIndex}
+                  onClick={() => selectSubtitle(NATIVE_SUB_BASE + i)}
+                >
+                  {s.label}
                   {langName(s.lang) ? ` (${langName(s.lang)})` : ""}
                 </TrackRow>
               ))}
