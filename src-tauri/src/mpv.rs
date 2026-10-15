@@ -941,7 +941,8 @@ mod tests {
 
         // The process dies on startup (bad option, blocked binary) -> exit status,
         // not a timeout: the two causes need different fixes.
-        let mut dead = Command::new("/bin/false").spawn().expect("false");
+        // NB: `false` is at /bin/false on Linux but /usr/bin/false on macOS.
+        let mut dead = Command::new("false").spawn().expect("false");
         let why = wait_for_ipc(&mut dead, &socket, Duration::from_secs(5)).unwrap_err();
         let _ = dead.wait();
         assert!(why.contains("exited during startup"), "unerwartet: {why}");
