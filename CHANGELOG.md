@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.5] — 2026-10-16
+
+### Changed
+- **The banner at the top of the home page now features a different set of films on every load.**
+  It used to be the first six of the "Top rated" row — the same films every time. The row is now
+  shuffled and a different handful is picked. The 9-second rotation between the featured films
+  already existed; it just cycled through an unchanged selection.
+
+### Fixed
+- **A release year is no longer shown as an IMDb rating.** Some panels put the year into their
+  `rating` field, which BabyFlix rendered as "★ 2016.0" — in the detail view even with a hard-coded
+  *IMDb* label next to it. A value now only counts as a rating when it is plausible (0–10);
+  otherwise the banner shows the year as a year and the detail view names the source correctly
+  ("Panel rating" instead of "IMDb rating"). This affected the banner, the poster cards and the
+  detail view.
+
 ## [1.5.4] — 2026-10-16
 
 ### Changed

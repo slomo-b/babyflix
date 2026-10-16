@@ -4,6 +4,19 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.5
+
+- 🔀 **The banner at the top of the home page now shows a different set of films on every load.**
+  It used to be the same first six of the "Top rated" row, in the same order. The row is now
+  shuffled and a different handful is featured. The 9-second rotation between the featured films
+  was already there — it simply cycled through an unchanged selection.
+- ⭐ **A release year is no longer shown as an IMDb rating.** Some panels put the year into their
+  `rating` field, which BabyFlix rendered as "★ 2016.0" — in the detail view even with a
+  hard-coded *IMDb* label next to it. A value now only counts as a rating when it is plausible
+  (0–10); otherwise the banner shows the year as a year, and the detail view names the source
+  correctly ("Panel rating" instead of "IMDb rating"). This affects the banner, the poster cards
+  and the detail view.
+
 ## 🆕 What's new in 1.5.4
 
 - 🎬 **One player instead of two — and nothing to install any more.** The native MPV engine is
