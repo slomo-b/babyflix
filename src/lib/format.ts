@@ -43,6 +43,22 @@ export function yearOf(date: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Manche Panels schreiben ins Feld `rating` das **Erscheinungsjahr** (z. B. 2016).
+ * Nur eine plausible Bewertung darf als IMDb-Stern erscheinen, sonst stünde dort
+ * "★ 2016.0" – siehe `yearFromTitle` für die Alternative.
+ */
+export function asRating(v: number | null | undefined): number | null {
+  return v != null && v > 0 && v <= 10 ? v : null;
+}
+
+/** Erscheinungsjahr aus einem Titel wie "IR - Khaneh Bakht (2016)". */
+export function yearFromTitle(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const m = name.match(/\((19|20)\d{2}\)/);
+  return m ? m[0].slice(1, 5) : null;
+}
+
 export function fmtTime(ts: number | null | undefined): string {
   if (!ts) return "";
   const locale = localeOf(useLang.getState().lang);

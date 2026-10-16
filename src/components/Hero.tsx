@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Play, Info, Star } from "lucide-react";
 import { imgUrl, MediaItem } from "../lib/api";
-import { fmtVotes } from "../lib/format";
+import { asRating, fmtVotes, yearFromTitle } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { useEnrichment } from "../lib/useEnrichment";
 
@@ -32,7 +32,10 @@ export function Hero({
   const item = items[Math.min(idx, items.length - 1)];
   const bg = imgUrl(item.cover);
   const info = imdb.get(item.id);
-  const rating = info?.rating ?? item.rating;
+  // Nur echte Bewertungen als Stern; das Panel-Feld enthält bei manchen Panels
+  // das Jahr, das sonst als "★ 2016.0" erschiene.
+  const rating = info?.rating ?? asRating(item.rating);
+  const year = yearFromTitle(item.name);
   const votes = info?.votes;
 
   return (
@@ -71,12 +74,14 @@ export function Hero({
             <span className="text-gradient">{item.name}</span>
           </h1>
           <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-white/80">
-            {rating != null && rating > 0 && (
+            {rating != null ? (
               <span className="inline-flex items-center gap-1.5 font-semibold">
                 <Star size={15} fill="#f5c518" stroke="#f5c518" />
                 {rating.toFixed(1)}
                 {votes ? <span className="text-white/50">· {fmtVotes(votes)} Votes</span> : null}
               </span>
+            ) : (
+              year && <span className="font-semibold text-white/70">{year}</span>
             )}
             <span className="rounded border border-white/20 px-1.5 py-0.5 text-[11px] font-bold">HD</span>
           </div>

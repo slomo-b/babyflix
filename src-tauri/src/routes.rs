@@ -52,6 +52,27 @@ fn cmp_rating(a: &MediaItem, b: &MediaItem) -> Ordering {
         .unwrap_or(Ordering::Equal)
 }
 
+/// Seed for the banner shuffle - it only has to differ between requests.
+fn seed_from_clock() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15)
+}
+
+/// Fisher-Yates with a xorshift64 generator. Avoids pulling in `rand` for what
+/// only exists to make the banner show a different set of films each time.
+fn shuffle<T>(items: &mut [T], seed: u64) {
+    let mut s = seed | 1;
+    for i in (1..items.len()).rev() {
+        s ^= s >> 12;
+        s ^= s << 25;
+        s ^= s >> 27;
+        let j = (s.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % (i + 1);
+        items.swap(i, j);
+    }
+}
+
 // ---------------- system ----------------
 
 async fn health(State(app): State<Arc<App>>) -> Json<Value> {
@@ -319,8 +340,12 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
         })
         .collect();
     top.sort_by(|a, b| cmp_rating(a, b));
-    let hero: Vec<&MediaItem> = top.iter().take(6).copied().collect();
     let top: Vec<&MediaItem> = top.into_iter().take(30).collect();
+    // The banner shows a *different* handful of the "top rated" row on every load
+    // instead of always the same first six films.
+    let mut pool: Vec<&MediaItem> = top.clone();
+    shuffle(&mut pool, seed_from_clock());
+    let hero: Vec<&MediaItem> = pool.into_iter().take(6).collect();
 
     let mut s: Vec<&MediaItem> = series
         .iter()
@@ -893,4 +918,33 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/img", get(img_h))
         .layer(CorsLayer::permissive())
         .with_state(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shuffle;
+
+    /// The banner picks a random subset, so the shuffle must be a real
+    /// permutation - never lose or duplicate an entry.
+    #[test]
+    fn shuffle_is_a_permutation() {
+        let base: Vec<u32> = (0..30).collect();
+        let mut a = base.clone();
+        shuffle(&mut a, 12345);
+        let mut sorted = a.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, base, "every element must survive the shuffle");
+        assert_ne!(a, base, "the order must actually change");
+    }
+
+    #[test]
+    fn shuffle_handles_degenerate_input() {
+        let mut empty: Vec<u32> = Vec::new();
+        shuffle(&mut empty, 1);
+        assert!(empty.is_empty());
+
+        let mut one = vec![7u32];
+        shuffle(&mut one, 1);
+        assert_eq!(one, vec![7]);
+    }
 }

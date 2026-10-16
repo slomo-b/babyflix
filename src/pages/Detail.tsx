@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Film, Heart, Info, Play, Shuffle, Star, X } from "lucide-react";
 import { api, imgUrl, Episode } from "../lib/api";
 import { useStore } from "../lib/store";
-import { fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
+import { asRating, fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { Select } from "../components/Select";
 
@@ -112,7 +112,10 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
     return () => clearTimeout(timer);
   }, [id, kind, history, autoResume, play]);
 
-  const rating = imdb?.rating ?? detail?.rating ?? item?.rating ?? null;
+  // Panel-Werte nur übernehmen, wenn sie wie eine Bewertung aussehen – manche
+  // Panels liefern dort das Jahr.
+  const rating = imdb?.rating ?? asRating(detail?.rating) ?? asRating(item?.rating) ?? null;
+  const ratingLabel = t(imdb?.rating != null ? "rating.imdb" : "rating.panel");
   const votes = imdb?.votes ?? null;
   const genres = (detail?.genre ?? imdb?.genres?.join(", ") ?? "")
     .split(/[,/]/)
@@ -414,13 +417,13 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
           </h1>
 
           <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            {rating != null && rating > 0 && (
+            {rating != null && (
               <span className="inline-flex items-center gap-2 rounded-xl border border-[var(--imdb)]/30 bg-[var(--imdb)]/10 px-3 py-1.5 font-bold text-[#ffdd66]">
                 <Star size={15} fill="#f5c518" stroke="#f5c518" />
                 {rating.toFixed(1)}
                 {votes ? <span className="font-medium text-white/50">({fmtVotes(votes)})</span> : null}
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
-                  IMDb
+                  {ratingLabel}
                 </span>
               </span>
             )}

@@ -1,7 +1,7 @@
 import { Play } from "lucide-react";
 import { imgUrl, MediaItem } from "../lib/api";
 import { RatingBadge } from "./RatingBadge";
-import { initials, initialsColor } from "../lib/format";
+import { asRating, initials, initialsColor } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { useStore } from "../lib/store";
 
@@ -30,7 +30,10 @@ export function MediaCard({
   badge?: string;
 }) {
   const cover = imgUrl(item.cover);
-  const rating = ratingOverride ?? item.rating;
+  // `ratingOverride` kommt aus der IMDb-Anreicherung; der Panel-Wert ist bei
+  // manchen Panels das Jahr und darf deshalb nicht als Stern erscheinen.
+  const rating = ratingOverride ?? asRating(item.rating);
+  const ratingSource = ratingOverride != null ? "imdb" : "panel";
   // Fortschritt zeigen, wenn der Titel schon angefangen wurde (Home-Karten).
   const entry = useStore((s) => s.history.find((h) => h.key === `${item.kind}:${item.id}`));
   const seenPct =
@@ -61,9 +64,9 @@ export function MediaCard({
 
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/5 to-transparent opacity-90" />
 
-        {rating != null && rating > 0 && (
+        {rating != null && (
           <div className="absolute left-2 top-2">
-            <RatingBadge value={rating} />
+            <RatingBadge value={rating} source={ratingSource} />
           </div>
         )}
         {badge && (
