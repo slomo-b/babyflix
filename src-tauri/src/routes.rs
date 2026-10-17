@@ -737,6 +737,9 @@ struct RemuxQ {
     /// Live pass-through for panels that only deliver raw MPEG-TS.
     #[serde(default)]
     live: Option<bool>,
+    /// Restart the remux at this source second (seek beyond the prepared range).
+    #[serde(default)]
+    seek: Option<f64>,
 }
 
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
@@ -765,18 +768,30 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         let report = app.capabilities.read().await;
         DecodeCaps::from_report(&report).unwrap_or_else(DecodeCaps::conservative)
     };
-    let key = format!("{}:{}:{}:{}", q.kind, q.id, ext, q.audio.unwrap_or(0));
+    let seek = q.seek.filter(|s| *s > 1.0);
+    // The seek offset is part of the key: a jump to a new position is a new
+    // session, while a repeat of the same position reuses it.
+    let key = format!(
+        "{}:{}:{}:{}:{}",
+        q.kind,
+        q.id,
+        ext,
+        q.audio.unwrap_or(0),
+        seek.map(|s| s as u64).unwrap_or(0)
+    );
     let audio = q.audio;
     let live = q.live.unwrap_or(false);
     let app2 = app.clone();
-    let res = tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps, live))
-        .await
-        .map_err(|e| ApiError(e.to_string()))?
-        .map_err(ApiError::from)?;
+    let res =
+        tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps, live, seek))
+            .await
+            .map_err(|e| ApiError(e.to_string()))?
+            .map_err(ApiError::from)?;
     Ok(Json(json!({
         "token": res.token,
         "playlist": format!("/api/hls/{}/index.m3u8", res.token),
         "duration": res.duration,
+        "offset": res.offset,
         "audio": res.streams.get("audio").cloned().unwrap_or(Value::Null),
         "video": res.streams.get("video").cloned().unwrap_or(Value::Null),
         "subtitle": res.streams.get("subtitle").cloned().unwrap_or(Value::Null),

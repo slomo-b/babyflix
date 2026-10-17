@@ -81,25 +81,6 @@ const TEXT_SUB_CODECS =
  */
 const DRAG_SEEK_MS = 200;
 
-/** Zeitleiste: klemmt ein Sprungziel in den tatsächlich spulbaren Bereich. */
-function clampToSeekable(v: HTMLVideoElement, t: number, dur: number): number {
-  let target = Math.min(Math.max(0, t), Math.max(0, dur - 0.5));
-  try {
-    const r = v.seekable;
-    if (r && r.length > 0) {
-      const last = r.length - 1;
-      for (let i = 0; i < r.length; i++) {
-        if (target >= r.start(i) && target <= r.end(i)) return target;
-      }
-      if (target < r.start(0)) target = r.start(0);
-      else target = Math.max(r.start(last), Math.min(target, r.end(last)));
-    }
-  } catch {
-    /* seekable wirft, solange nichts geladen ist */
-  }
-  return target;
-}
-
 /** Tastenkürzel-Übersicht: Taste → i18n-Schlüssel. */
 const SHORTCUTS: [string, string][] = [
   ["Space", "player.kPlay"],
@@ -168,6 +149,16 @@ export function Player() {
    * attempt again instead of inheriting the fallback.
    */
   const [liveRemuxFor, setLiveRemuxFor] = useState<string | null>(null);
+  /**
+   * Film-Sekunde, an der die laufende Remux-Session beginnt. Springt man
+   * ausserhalb des bereits aufbereiteten Bereichs, wird der Remux dort neu
+   * gestartet (`ffmpeg -ss`) statt den Sprung zu klemmen - nur so ist jede
+   * Position im Film erreichbar.
+   */
+  const desiredOffset = useRef<{ key: string; at: number } | null>(null);
+  const offsetRef = useRef(0);
+  /** Zähler, der den Ladeeffekt für einen Neustart an der Zielstelle auslöst. */
+  const [seekNonce, setSeekNonce] = useState(0);
 
   // last low-level failure message, shown in the error overlay so a broken stream is debuggable
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -256,10 +247,23 @@ export function Player() {
   useEffect(() => {
     const video = videoRef.current;
     if (!current || !video) return;
+
+    // Wo diese Session beginnt: eine offene Sprung-Anforderung (Remux-Neustart
+    // mitten im Film) oder der Fortsetzungszeitpunkt aus dem Verlauf.
+    const resume = history.find((h) => h.key === current.historyKey);
+    const resumeAt =
+      current.startAt && current.startAt > 10
+        ? current.startAt
+        : resume && resume.position > 10
+          ? resume.position
+          : 0;
+    const wanted = desiredOffset.current;
+    const seekAt = wanted && wanted.key === streamKey ? wanted.at : resumeAt;
+
     setError(false);
     setErrorMsg(null);
     setLoading(true);
-    setPosition(0);
+    setPosition(seekAt);
     setDuration(0);
     resetTracks();
     setSubTrax([]);
@@ -347,13 +351,22 @@ export function Player() {
             }
             autoAudioRef.current = true;
           }
-          const res = await api.remux(current.kind, current.id, current.ext, audioIdx, liveRemux);
+          const res = await api.remux(
+            current.kind,
+            current.id,
+            current.ext,
+            audioIdx,
+            liveRemux,
+            seekAt > 1 ? seekAt : undefined
+          );
           if (cancelled) {
             api.remuxStop(res.token);
             return;
           }
           sessionToken = res.token;
           remuxTokenRef.current = res.token;
+          // Ab welcher Film-Sekunde dieser Stream läuft (0 = von vorne).
+          offsetRef.current = res.offset ?? 0;
           const audio = res.audio && res.audio.length ? res.audio : preAudio;
           if (audio.length) {
             setAudioTracks(
@@ -416,8 +429,6 @@ export function Player() {
 
     startPlayback();
 
-    const resume = history.find((h) => h.key === current.historyKey);
-
     let endTimer: number | null = null;
     // Am Ende wird nicht mehr still weitergeschaltet: es kommt die Endkarte,
     // die den Wechsel anbietet (und je nach Einstellung automatisch startet).
@@ -441,11 +452,15 @@ export function Player() {
         }
         if (subs.length) setSubtitleTracks(subs);
       }
-      const startAt = current.startAt;
-      if (startAt && startAt > 10 && current.kind !== "live" && video.duration > 0) {
-        video.currentTime = Math.min(startAt, Math.max(0, video.duration - 5));
-      } else if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
-        video.currentTime = resume.position;
+      // Läuft der Stream schon an der gewünschten Stelle (Offset-Session), darf
+      // nicht noch einmal gesprungen werden.
+      if (offsetRef.current <= 0) {
+        const startAt = current.startAt;
+        if (startAt && startAt > 10 && current.kind !== "live" && video.duration > 0) {
+          video.currentTime = Math.min(startAt, Math.max(0, video.duration - 5));
+        } else if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
+          video.currentTime = resume.position;
+        }
       }
       // Quelle wirklich anspielen – auch die automatisch nachgeschobene Folge,
       // bei der kein Klick des Nutzers mehr kommt.
@@ -453,15 +468,19 @@ export function Player() {
       if (started && typeof started.catch === "function") started.catch(() => {});
     };
     const onTime = () => {
-      setPosition(video.currentTime);
+      // Der Remux-Stream trägt seine eigene Zeitachse; die Filmzeit ergibt sich
+      // aus Offset + Position im Stream.
+      const abs = offsetRef.current + video.currentTime;
+      setPosition(abs);
       const elDur = Number.isFinite(video.duration) ? video.duration : 0;
-      const dur = elDur > 0 ? elDur : durRef.current;
+      // Gesamtlänge ist die des Films, nicht die des Rest-Stücks nach einem Sprung.
+      const dur = durRef.current > 0 ? durRef.current : elDur;
       // Solange die Backend-Länge fehlt, die des Videoelements übernehmen.
       if (elDur > 0) setDuration((d) => (d > 0 ? d : elDur));
       const now = Date.now();
       if (now - lastSave.current > 4000) {
         lastSave.current = now;
-        persist(video.currentTime, dur);
+        persist(abs, dur);
       }
       // Gepufferter Bereich (heller Balken hinter dem Fortschritt).
       try {
@@ -474,14 +493,14 @@ export function Player() {
           }
         }
         if (!end && b.length) end = b.end(b.length - 1);
-        setBufferedPct(dur > 0 ? Math.min(100, (end / dur) * 100) : 0);
+        setBufferedPct(dur > 0 ? Math.min(100, ((offsetRef.current + end) / dur) * 100) : 0);
       } catch {
         /* buffered wirft, solange nichts geladen ist */
       }
       // Wächter: FFmpeg-Remux-Streams (HLS „event") melden am Ende nicht immer
       // ein „ended". Stockt die Wiedergabe am Ende, kommt die Endkarte trotzdem.
       if (current.kind !== "live" && !endShownRef.current) {
-        if (dur > 0 && !video.paused && video.currentTime >= dur - 1.5) {
+        if (durRef.current > 0 && !video.paused && abs >= durRef.current - 1.5) {
           if (endTimer === null) {
             endTimer = window.setTimeout(() => {
               endTimer = null;
@@ -533,7 +552,7 @@ export function Player() {
       if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, remuxAudio, forceRemux, liveRemuxFor, reloadKey]);
+  }, [streamKey, remuxAudio, forceRemux, liveRemuxFor, seekNonce, reloadKey]);
 
   const persist = useCallback(
     (pos: number, dur: number) => {
@@ -557,9 +576,15 @@ export function Player() {
 
   const close = useCallback(() => {
     const v = videoRef.current;
-    if (v) persist(v.currentTime, Number.isFinite(v.duration) ? v.duration : 0);
+    if (v) {
+      const d = durRef.current > 0 ? durRef.current : Number.isFinite(v.duration) ? v.duration : 0;
+      persist(offsetRef.current + v.currentTime, d);
+    }
     cleanup();
     stop();
+    // Eine Sprung-Anforderung gilt nur für diese Wiedergabe; beim nächsten
+    // Start entscheidet wieder der Verlauf.
+    desiredOffset.current = null;
   }, [persist, stop, cleanup]);
 
   /** „Jetzt abspielen" im Als-Nächstes-Band. */
@@ -584,11 +609,15 @@ export function Player() {
     else v.pause();
   }, []);
 
-  /** Verlässliche Gesamtlänge: Element-Dauer, sonst die vom Backend geprobte. */
+  /**
+   * Verlässliche Gesamtlänge des Films. Nach einem Sprung startet die
+   * Remux-Session mitten im Film - dann ist die Element-Dauer nur der Rest,
+   * deshalb gewinnt die vom Backend geprobte Gesamtlänge.
+   */
   const totalDuration = useCallback(() => {
+    if (durRef.current > 0) return durRef.current;
     const v = videoRef.current;
-    const elDur = v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
-    return elDur > 0 ? elDur : durRef.current;
+    return v && Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
   }, []);
 
   /** Endkarte schließen und den Automatik-Countdown stoppen. */
@@ -676,28 +705,48 @@ export function Player() {
     v.play().catch(() => {});
   }, [cancelEnd]);
 
-  /** Sprung an eine absolute Zeit (Zeitleiste, Kürzel). */
+  /**
+   * Sprung an eine absolute Filmzeit. Liegt das Ziel im bereits aufbereiteten
+   * Bereich, wird lokal gesprungen; sonst startet der Remux an der Zielstelle
+   * neu - nur so ist jede Position erreichbar, statt am Ende des aufbereiteten
+   * Teils zu landen.
+   */
   const seekToTime = useCallback(
-    (t: number, keepHover = false) => {
+    (t: number, keepHover = false, allowRestart = true) => {
       const v = videoRef.current;
       if (!v) return;
       const dur = totalDuration();
       if (!(dur > 0)) return;
-      const target = clampToSeekable(v, t, dur);
+      const target = Math.min(Math.max(0, t), Math.max(0, dur - 0.5));
+      const off = offsetRef.current;
+      let ready = 0;
       try {
-        v.currentTime = target;
+        const r = v.seekable;
+        if (r && r.length > 0) ready = r.end(r.length - 1);
       } catch {
-        /* ignore */
+        /* seekable wirft, solange nichts geladen ist */
       }
-      setPosition(target);
-      // Beim Ziehen soll die Vorschau-Anzeige dem Zeiger folgen und nicht nach
-      // jedem Zwischensprung verschwinden.
+      const local = target - off;
+      if (local >= 0 && local <= ready + 0.25) {
+        try {
+          v.currentTime = Math.max(0, local);
+        } catch {
+          /* ignore */
+        }
+        setPosition(target);
+      } else if (allowRestart) {
+        desiredOffset.current = { key: streamKey, at: target };
+        setPosition(target);
+        setLoading(true);
+        setSeekNonce((n) => n + 1);
+      }
+      // Beim Ziehen (allowRestart = false) bleibt das Bild stehen, wenn das Ziel
+      // noch nicht bereit ist; neu gestartet wird erst beim Loslassen.
       if (!keepHover) setHoverPct(null);
-      // Zurückspulen heißt: wieder mitten in der Folge.
       endShownRef.current = false;
       cancelEnd();
     },
-    [cancelEnd, totalDuration]
+    [cancelEnd, streamKey, totalDuration]
   );
 
   /** Kurzer Einblender („+10 s") beim Springen. */
@@ -714,7 +763,7 @@ export function Player() {
       const dur = totalDuration();
       if (!(dur > 0)) return;
       if (withFlash) showFlash(`${delta > 0 ? "+" : "−"}${Math.abs(delta)} s`);
-      seekToTime(v.currentTime + delta);
+      seekToTime(offsetRef.current + v.currentTime + delta);
     },
     [showFlash, seekToTime, totalDuration]
   );
@@ -746,7 +795,9 @@ export function Player() {
     const now = performance.now();
     if (now - lastDragSeek.current < DRAG_SEEK_MS) return;
     lastDragSeek.current = now;
-    seekToTime(f * dur, true);
+    // Während des Ziehens nicht neu starten - sonst würde jeder Zwischenschritt
+    // einen FFmpeg-Lauf auslösen. Der Neustart passiert beim Loslassen.
+    seekToTime(f * dur, true, false);
   };
   const onBarUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const wasDragging = draggingRef.current;

@@ -29,6 +29,9 @@ struct Session {
     /// Source URL - reused by the subtitle extraction (W4), so it never has to
     /// open a second connection just to resolve the stream again.
     url: String,
+    /// Source position this session starts at (`-ss`). Subtitle extraction uses
+    /// the same offset, so the WebVTT cues stay aligned with the video.
+    offset: f64,
 }
 
 pub struct RemuxStart {
@@ -37,6 +40,10 @@ pub struct RemuxStart {
     pub streams: Value,
     /// What FFmpeg was actually told to do (copy vs transcode) and why.
     pub decision: Value,
+    /// Source position (seconds) where this HLS starts. Non-zero after a seek
+    /// beyond the already prepared range: the player adds it to its own
+    /// timeline, so the film keeps its absolute time.
+    pub offset: f64,
 }
 
 pub struct Remux {
@@ -485,6 +492,11 @@ impl Remux {
     }
 
     /// Start (or reuse) a remux session; returns the token, duration and stream info.
+    ///
+    /// `seek` restarts the FFmpeg input at that source second - the only way to
+    /// reach a position the already prepared playlist does not cover yet. The
+    /// resulting HLS starts at 0, so `offset` tells the player where that is in
+    /// the film.
     pub fn start(
         &self,
         key: &str,
@@ -492,7 +504,9 @@ impl Remux {
         audio: Option<usize>,
         caps: &DecodeCaps,
         live: bool,
+        seek: Option<f64>,
     ) -> Result<RemuxStart> {
+        let offset = seek.filter(|t| *t > 1.0).unwrap_or(0.0);
         let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
         // Reuse an existing session for the exact key.
@@ -503,6 +517,7 @@ impl Remux {
                 if let Some(sess) = s.get_mut(tok) {
                     sess.last = Instant::now();
                     let tok2 = tok.clone();
+                    let offset = sess.offset;
                     drop(s);
                     let info = self.probe_json(url);
                     let streams = info
@@ -518,7 +533,7 @@ impl Remux {
                         .unwrap()
                         .clone()
                         .unwrap_or(Value::Null);
-                    return Ok(RemuxStart { token: tok2, duration, streams, decision });
+                    return Ok(RemuxStart { token: tok2, duration, streams, decision, offset });
                 }
             }
         }
@@ -582,8 +597,13 @@ impl Remux {
             .arg("error")
             .arg("-nostdin")
             .arg("-user_agent")
-            .arg(UA)
-            .arg("-i")
+            .arg(UA);
+        if offset > 0.0 {
+            // Input seek: FFmpeg jumps inside the source instead of reading up to
+            // there, which is what makes an arbitrary jump immediate.
+            cmd.arg("-ss").arg(format!("{offset:.3}"));
+        }
+        cmd.arg("-i")
             .arg(url)
             .arg("-map")
             .arg("0:v:0")
@@ -647,10 +667,11 @@ impl Remux {
                 last: Instant::now(),
                 live,
                 url: url.to_string(),
+                offset,
             },
         );
         self.keys.lock().unwrap().insert(key.to_string(), token.clone());
-        Ok(RemuxStart { token, duration, streams, decision })
+        Ok(RemuxStart { token, duration, streams, decision, offset })
     }
 
     /// Decision of the most recently started session (`copy` vs `transcode`).
@@ -717,12 +738,12 @@ impl Remux {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
-        let (dir, url) = {
+        let (dir, url, offset) = {
             let sessions = self.sessions.lock().unwrap();
             let s = sessions
                 .get(token)
                 .ok_or_else(|| anyhow!("no running session for this token"))?;
-            (s.dir.clone(), s.url.clone())
+            (s.dir.clone(), s.url.clone(), s.offset)
         };
         let ffmpeg = self.ffmpeg_bin().ok_or_else(|| anyhow!("ffmpeg not found"))?;
 
@@ -734,8 +755,12 @@ impl Remux {
             .arg("-nostdin")
             .arg("-y")
             .arg("-user_agent")
-            .arg(UA)
-            .arg("-i")
+            .arg(UA);
+        if offset > 0.0 {
+            // Same offset as the video session, so the cues keep their place.
+            cmd.arg("-ss").arg(format!("{offset:.3}"));
+        }
+        cmd.arg("-i")
             .arg(&url);
         for &i in indices {
             let file = format!("sub_{i}.vtt");
