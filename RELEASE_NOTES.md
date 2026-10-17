@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.7
+
+- ⏭️ **You can now jump to any position in a film.** Seeking used to be limited to the part FFmpeg
+  had already prepared — asking for 2:00:00 could silently land you at 26:00. If the target is not
+  prepared yet, the conversion now restarts at that position and playback picks up right there: a
+  short loading moment instead of a wrong jump. Resuming a film from the history starts at that
+  position directly, too.
+
 ## 🆕 What's new in 1.5.6
 
 - ⏩ **Scrubbing the timeline now seeks while you drag.** Before, only the preview moved and the

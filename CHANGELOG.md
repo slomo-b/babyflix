@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.7] — 2026-10-17
+
+### Fixed
+- **Jumping to any position in a film now actually goes there.** Seeking was limited to the part
+  FFmpeg had already remuxed, and the jump was silently clamped to the end of that range — asking
+  for 2:00:00 could land at 26:00. When the target lies outside the prepared range, the remux is
+  now restarted at that position (FFmpeg `-ss`, input seek) and playback continues from there.
+  Everything that deals with time — display, timeline, buffer bar, progress saving, the end guard
+  and the keyboard jumps — accounts for the offset, and the total length still comes from the
+  backend rather than from the remaining part. Resuming from the history now starts the session at
+  that position as well. While dragging, no restart happens (it would spawn one FFmpeg run per
+  step); the restart happens on release. `clampToSeekable` is gone — it bent the jump instead of
+  enabling it.
+
 ## [1.5.6] — 2026-10-17
 
 ### Changed
