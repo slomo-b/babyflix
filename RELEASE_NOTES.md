@@ -4,6 +4,16 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.6
+
+- ⏩ **Scrubbing the timeline now seeks while you drag.** Before, only the preview moved and the
+  player jumped when you let go — scrubbing felt sticky. The picture now follows the pointer,
+  throttled to one seek every 200 ms so the remux can keep up, and releasing lands exactly on the
+  target position.
+- 🧹 **The two jump markers inside the progress bar are gone.** One of them sat at exactly two
+  thirds of the film, labelled "Skip ahead (two thirds)" — a fixed position that fits almost no
+  film.
+
 ## 🆕 What's new in 1.5.5
 
 - 🔀 **The banner at the top of the home page now shows a different set of films on every load.**

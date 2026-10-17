@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.6] — 2026-10-17
+
+### Changed
+- **Dragging the timeline now seeks while you drag.** Previously only the preview moved and the
+  player jumped when you let go, which made scrubbing feel sticky. The picture now follows the
+  pointer, throttled to one seek every 200 ms — every seek costs a new HLS segment in the remux,
+  so unthrottled scrubbing would stall playback. Releasing still seeks to the exact position.
+
+### Removed
+- **The two jump markers inside the progress bar** (start and two thirds). The latter was labelled
+  "Skip ahead (two thirds)" — a fixed position that fits almost no film. `seekTo` and the
+  `player.jumpIntro` / `player.jumpOutro` strings are gone with it.
+
 ## [1.5.5] — 2026-10-16
 
 ### Changed
