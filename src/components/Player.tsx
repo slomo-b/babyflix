@@ -74,6 +74,13 @@ const NATIVE_SUB_BASE = 100;
 const TEXT_SUB_CODECS =
   /^(subrip|srt|ass|ssa|mov_text|webvtt|text|microdvd|jacosub|sami|stl|subviewer|vtt)/i;
 
+/**
+ * Beim Ziehen an der Zeitleiste höchstens alle 200 ms springen. Jeder Sprung in
+ * einem HLS-Remux kostet ein neues Segment; zu viele pro Sekunde würden ihn
+ * ausbremsen. Dazwischen wandert nur die Vorschau.
+ */
+const DRAG_SEEK_MS = 200;
+
 /** Zeitleiste: klemmt ein Sprungziel in den tatsächlich spulbaren Bereich. */
 function clampToSeekable(v: HTMLVideoElement, t: number, dur: number): number {
   let target = Math.min(Math.max(0, t), Math.max(0, dur - 0.5));
@@ -183,6 +190,8 @@ export function Player() {
   const [hoverPct, setHoverPct] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
+  /** Zeitpunkt des letzten Zwischensprungs beim Ziehen (Drosselung). */
+  const lastDragSeek = useRef(0);
   const [bufferedPct, setBufferedPct] = useState(0);
   const [speed, setSpeed] = useState(1);
   const speedRef = useRef(1);
@@ -667,9 +676,9 @@ export function Player() {
     v.play().catch(() => {});
   }, [cancelEnd]);
 
-  /** Sprung an eine absolute Zeit (Zeitleiste, Kürzel, Sprungmarken). */
+  /** Sprung an eine absolute Zeit (Zeitleiste, Kürzel). */
   const seekToTime = useCallback(
-    (t: number) => {
+    (t: number, keepHover = false) => {
       const v = videoRef.current;
       if (!v) return;
       const dur = totalDuration();
@@ -681,7 +690,9 @@ export function Player() {
         /* ignore */
       }
       setPosition(target);
-      setHoverPct(null);
+      // Beim Ziehen soll die Vorschau-Anzeige dem Zeiger folgen und nicht nach
+      // jedem Zwischensprung verschwinden.
+      if (!keepHover) setHoverPct(null);
       // Zurückspulen heißt: wieder mitten in der Folge.
       endShownRef.current = false;
       cancelEnd();
@@ -708,18 +719,7 @@ export function Player() {
     [showFlash, seekToTime, totalDuration]
   );
 
-  /** Sprungmarken: Anfang und zwei Drittel – typische Intro-/Abspannlängen. */
-  const seekTo = useCallback(
-    (frac: number) => {
-      const dur = totalDuration();
-      if (!(dur > 0)) return;
-      seekToTime(Math.min(dur - 1, dur * frac));
-    },
-    [seekToTime, totalDuration]
-  );
-
-  // Zeitleiste: Zeigerposition → Anteil. Beim Ziehen wird nur die Vorschau
-  // bewegt, gesprungen wird beim Loslassen (der Remux-Stream dankt es).
+  // Zeitleiste: Zeigerposition → Anteil.
   const barPctFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = e.currentTarget.getBoundingClientRect();
     if (!el.width) return 0;
@@ -731,9 +731,22 @@ export function Player() {
     draggingRef.current = true;
     setDragging(true);
     setHoverPct(barPctFromEvent(e));
+    lastDragSeek.current = 0;
   };
+  /**
+   * Ziehen spult mit: das Bild folgt dem Zeiger, statt erst beim Loslassen zu
+   * springen. Gedrosselt (siehe DRAG_SEEK_MS), damit der Remux hinterherkommt.
+   */
   const onBarMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    setHoverPct(barPctFromEvent(e));
+    const f = barPctFromEvent(e);
+    setHoverPct(f);
+    if (!draggingRef.current) return;
+    const dur = totalDuration();
+    if (!(dur > 0)) return;
+    const now = performance.now();
+    if (now - lastDragSeek.current < DRAG_SEEK_MS) return;
+    lastDragSeek.current = now;
+    seekToTime(f * dur, true);
   };
   const onBarUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const wasDragging = draggingRef.current;
@@ -1317,28 +1330,6 @@ export function Player() {
                   }`}
                   style={{ left: `${barPct}%` }}
                 />
-                {/* Sprungmarken im Balken: Anfang + zwei Drittel */}
-                {[0, 66.6].map((f) => (
-                  <button
-                    key={f}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      seekTo(f / 100);
-                    }}
-                    title={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
-                    aria-label={f === 0 ? t("player.jumpIntro") : t("player.jumpOutro")}
-                    className={`absolute top-1/2 -translate-y-1/2 ${
-                      f === 0 ? "-translate-x-1/2" : "translate-x-0"
-                    }`}
-                    style={{ left: `${f}%` }}
-                  >
-                    <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-black/45 text-white/90 transition hover:scale-110 hover:border-white hover:bg-black/80">
-                      <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
-                        <path d="M0 0h6L3 4l3 4H0z" />
-                      </svg>
-                    </span>
-                  </button>
-                ))}
               </div>
 
               {/* Vorschau-Zeit über dem Zeiger */}
