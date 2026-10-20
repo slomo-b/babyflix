@@ -1,13 +1,56 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search as SearchIcon } from "lucide-react";
-import { api } from "../lib/api";
+import { api, ImdbInfo, MediaItem } from "../lib/api";
 import { Row } from "../components/Row";
-import { RowSkeleton } from "../components/Skeletons";
+import { GridSkeleton, RowSkeleton } from "../components/Skeletons";
+import { MediaCard } from "../components/MediaCard";
 import { useOpen } from "../lib/useOpen";
 import { useScrollMemory } from "../lib/useScrollMemory";
+import { useEnrichment } from "../lib/useEnrichment";
 import { useT } from "../lib/i18n";
+
+/**
+ * Treffer pro Seite. Vorher waren es 24 in einem horizontalen Regal, von dem nur
+ * eine Handvoll gleichzeitig sichtbar war - jetzt ein Raster mit 60.
+ */
+const PAGE_SIZE = 60;
+
+/** Nächste Seite, solange noch nicht alle Treffer geladen sind. */
+function nextPage(
+  last: { page: number; page_size: number; total: number },
+  pages: unknown[]
+): number | undefined {
+  return pages.length * last.page_size < last.total ? last.page + 1 : undefined;
+}
+
+function PosterGrid({
+  items,
+  imdb,
+  onOpen,
+}: {
+  items: MediaItem[];
+  imdb: Map<string, ImdbInfo | null>;
+  onOpen: (item: MediaItem) => void;
+}) {
+  return (
+    <div
+      className="grid gap-4"
+      style={{ gridTemplateColumns: "repeat(auto-fill,minmax(158px,1fr))" }}
+    >
+      {items.map((item) => (
+        <MediaCard
+          key={item.id}
+          item={item}
+          width="100%"
+          ratingOverride={imdb.get(item.id)?.rating ?? undefined}
+          onClick={() => onOpen(item)}
+        />
+      ))}
+    </div>
+  );
+}
 
 export default function Search() {
   const t = useT();
@@ -35,28 +78,89 @@ export default function Search() {
   }, [params]);
 
   const enabled = term.length > 1;
-  const movies = useQuery({
-    queryKey: ["search", "movie", term],
-    queryFn: () => api.browse({ kind: "movie", q: term, sort: "rating", page_size: 24 }),
+
+  const movies = useInfiniteQuery({
+    queryKey: ["search-grid", "movie", term],
+    queryFn: ({ pageParam }) =>
+      api.browse({
+        kind: "movie",
+        q: term,
+        sort: "rating",
+        page: pageParam as number,
+        page_size: PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: nextPage,
     enabled,
   });
-  const series = useQuery({
-    queryKey: ["search", "series", term],
-    queryFn: () => api.browse({ kind: "series", q: term, sort: "rating", page_size: 24 }),
+
+  const series = useInfiniteQuery({
+    queryKey: ["search-grid", "series", term],
+    queryFn: ({ pageParam }) =>
+      api.browse({
+        kind: "series",
+        q: term,
+        sort: "rating",
+        page: pageParam as number,
+        page_size: PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: nextPage,
     enabled,
   });
+
   const live = useQuery({
     queryKey: ["search", "live", term],
     queryFn: () => api.browse({ kind: "live", q: term, sort: "name", page_size: 24 }),
     enabled,
   });
 
+  const movieItems = useMemo(() => movies.data?.pages.flatMap((p) => p.items) ?? [], [movies.data]);
+  const seriesItems = useMemo(
+    () => series.data?.pages.flatMap((p) => p.items) ?? [],
+    [series.data]
+  );
+
+  // Der Batch-Endpunkt verkraftet 60 Titel pro Aufruf - genug für ein Raster.
+  const movieImdb = useEnrichment(movieItems, enabled, PAGE_SIZE);
+  const seriesImdb = useEnrichment(seriesItems, enabled, PAGE_SIZE);
+
+  const movieTotal = movies.data?.pages[0]?.total ?? 0;
+  const seriesTotal = series.data?.pages[0]?.total ?? 0;
+
+  const loading = movies.isLoading || series.isLoading || live.isLoading;
   const nothing =
-    enabled &&
-    !movies.isLoading &&
-    !series.isLoading &&
-    !live.isLoading &&
-    !(movies.data?.items.length || series.data?.items.length || live.data?.items.length);
+    enabled && !loading && !movieItems.length && !seriesItems.length && !live.data?.items.length;
+
+  const section = (
+    title: string,
+    items: MediaItem[],
+    total: number,
+    imdb: Map<string, ImdbInfo | null>,
+    more: { hasNext: boolean; busy: boolean; load: () => void }
+  ) => {
+    if (!items.length) return null;
+    return (
+      <section className="mb-10">
+        <div className="mb-4 flex items-baseline justify-between gap-4">
+          <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+          <span className="text-xs text-[var(--muted)]">
+            {t("catalog.items", { n: total.toLocaleString() })}
+          </span>
+        </div>
+
+        <PosterGrid items={items} imdb={imdb} onOpen={open} />
+
+        {more.hasNext && (
+          <div className="mt-6 flex justify-center">
+            <button className="btn btn-ghost" onClick={more.load} disabled={more.busy}>
+              {more.busy ? t("catalog.loadingMore") : t("search.loadMore")}
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  };
 
   return (
     <div className="animate-fade-in pt-6">
@@ -83,9 +187,10 @@ export default function Search() {
 
       {enabled && (
         <>
-          {movies.isLoading && series.isLoading && live.isLoading && (
+          {loading && (
             <>
-              <RowSkeleton />
+              <GridSkeleton count={12} />
+              <div className="h-10" />
               <RowSkeleton />
             </>
           )}
@@ -96,25 +201,21 @@ export default function Search() {
             </div>
           )}
 
-          {!movies.isLoading && (movies.data?.items.length ?? 0) > 0 && (
-            <Row
-              title={t("nav.movies")}
-              kind="movie"
-              items={movies.data!.items}
-              onOpen={open}
-              onPlay={playItem}
-              enrich
-            />
-          )}
-          {!series.isLoading && (series.data?.items.length ?? 0) > 0 && (
-            <Row
-              title={t("nav.series")}
-              kind="series"
-              items={series.data!.items}
-              onOpen={open}
-              onPlay={playItem}
-            />
-          )}
+          {!loading &&
+            section(t("nav.movies"), movieItems, movieTotal, movieImdb, {
+              hasNext: !!movies.hasNextPage,
+              busy: movies.isFetchingNextPage,
+              load: () => void movies.fetchNextPage(),
+            })}
+
+          {!loading &&
+            section(t("nav.series"), seriesItems, seriesTotal, seriesImdb, {
+              hasNext: !!series.hasNextPage,
+              busy: series.isFetchingNextPage,
+              load: () => void series.fetchNextPage(),
+            })}
+
+          {/* Sender bleiben ein Regal - das sind Kanäle, keine Poster. */}
           {!live.isLoading && (live.data?.items.length ?? 0) > 0 && (
             <Row
               title={t("nav.live")}

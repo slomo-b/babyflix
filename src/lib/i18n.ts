@@ -143,6 +143,7 @@ const de: Record<string, string> = {
   "search.placeholder": "Suche nach Filmen, Serien oder Sendern…",
   "search.hint": "Gib mindestens zwei Zeichen ein, um den gesamten Katalog zu durchsuchen.",
   "search.noResults": "Keine Treffer für „{q}“.",
+  "search.loadMore": "Mehr anzeigen",
 
   // detail
   "detail.firstEpisode": "Erste Folge",
@@ -393,6 +394,7 @@ const en: Record<string, string> = {
   "search.placeholder": "Search movies, series or channels…",
   "search.hint": "Enter at least two characters to search the whole library.",
   "search.noResults": "No results for “{q}”.",
+  "search.loadMore": "Show more",
 
   "detail.firstEpisode": "First episode",
   "detail.randomEpisode": "Random episode",
