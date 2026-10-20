@@ -401,6 +401,12 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
 
         {/* RIGHT: title + meta + overview + credits + episodes */}
         <div className="min-w-0 flex-1 lg:pt-8">
+          {query.data?.incomplete && (
+            <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-snug text-amber-200">
+              <Info size={16} className="mt-0.5 shrink-0" />
+              <span>{t("detail.incomplete")}</span>
+            </div>
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-white/80 backdrop-blur">
               {kind === "series" ? t("common.serie") : t("common.movie")}

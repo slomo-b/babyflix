@@ -149,6 +149,8 @@ const de: Record<string, string> = {
   "detail.firstEpisode": "Erste Folge",
   "detail.randomEpisode": "Zufällige Folge",
   "detail.noEpisodes": "Keine Folgen",
+  "detail.incomplete":
+    "Der Anbieter hat die Detaildaten nicht geliefert. Beschreibung und Folgen fehlen eventuell – Wiedergabe ist weiterhin möglich.",
   "detail.lastWatched": "Zuletzt gesehen",
   "detail.continueWith": "Weiterschauen: {ep}",
   "detail.addFavorite": "Zur Merkliste",
@@ -399,6 +401,8 @@ const en: Record<string, string> = {
   "detail.firstEpisode": "First episode",
   "detail.randomEpisode": "Random episode",
   "detail.noEpisodes": "No episodes",
+  "detail.incomplete":
+    "The provider did not return the detail data. Description and episodes may be missing – playback still works.",
   "detail.lastWatched": "Last watched",
   "detail.continueWith": "Resume: {ep}",
   "detail.addFavorite": "Add to watchlist",

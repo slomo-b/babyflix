@@ -84,6 +84,8 @@ export interface DetailResponse {
   detail: DetailInfo;
   seasons: Season[];
   imdb: ImdbInfo | null;
+  /** The provider did not return the detail data; the page falls back to the catalog entry. */
+  incomplete?: boolean;
 }
 
 export interface HomeRow {

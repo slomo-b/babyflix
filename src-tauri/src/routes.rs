@@ -419,10 +419,43 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
         return m3u_detail(&app, &q).await;
     }
     let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    // A panel that answers a detail request with a web page (broken id, blocked
+    // request, rate limit, expired session) must not turn the page into a dead
+    // end. Fall back to what the catalog already knows and mark the result as
+    // incomplete, so the UI can say that the detail data is missing.
+    let mut incomplete = false;
     let mut md = if q.kind == "series" {
-        xtream::series_detail(&app.client, &s, &q.id).await?
+        match xtream::series_detail(&app.client, &s, &q.id).await {
+            Ok(md) => md,
+            Err(e) => match app.find_item(&q.id).await {
+                Some(item) => {
+                    eprintln!("[babyflix] series detail unavailable for {}: {e}", q.id);
+                    incomplete = true;
+                    xtream::MovieDetail {
+                        item,
+                        detail: Default::default(),
+                        seasons: Vec::new(),
+                    }
+                }
+                None => return Err(ApiError::from(e)),
+            },
+        }
     } else {
-        xtream::movie_detail(&app.client, &s, &q.id).await?
+        match xtream::movie_detail(&app.client, &s, &q.id).await {
+            Ok(md) => md,
+            Err(e) => match app.find_item(&q.id).await {
+                Some(item) => {
+                    eprintln!("[babyflix] movie detail unavailable for {}: {e}", q.id);
+                    incomplete = true;
+                    xtream::MovieDetail {
+                        item,
+                        detail: Default::default(),
+                        seasons: Vec::new(),
+                    }
+                }
+                None => return Err(ApiError::from(e)),
+            },
+        }
     };
     // enrich with keyless IMDb (rating/votes/poster/cast)
     let year = parse_year(md.detail.release_date.as_deref());
@@ -449,6 +482,7 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
         "detail": md.detail,
         "seasons": md.seasons,
         "imdb": imdb,
+        "incomplete": incomplete,
     })))
 }
 
@@ -504,7 +538,7 @@ async fn m3u_detail(app: &Arc<App>, q: &DetailQ) -> Result<Json<Value>, ApiError
         vec![]
     };
 
-    Ok(Json(json!({ "item": it, "detail": detail, "seasons": seasons, "imdb": imdb })))
+    Ok(Json(json!({ "item": it, "detail": detail, "seasons": seasons, "imdb": imdb, "incomplete": false })))
 }
 
 #[derive(Deserialize)]
