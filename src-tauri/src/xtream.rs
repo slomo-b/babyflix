@@ -417,6 +417,16 @@ pub async fn probe(client: &reqwest::Client, url: &str, ua: &str) -> Probe {
     }
 }
 
+/// Single-line excerpt of a response body, for error messages.
+fn snippet(text: &str, max: usize) -> String {
+    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = clean.chars().take(max).collect();
+    if clean.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
 async fn api(
     client: &reqwest::Client,
     session: &Session,
@@ -430,18 +440,49 @@ async fn api(
         Some(action),
         params,
     )?;
-    let text = client
-        .get(&url)
-        .header("User-Agent", &session.ua)
-        .timeout(Duration::from_secs(60))
-        .send()
-        .await?
-        .text()
-        .await?;
-    if text.trim().is_empty() {
-        return Ok(Value::Array(vec![]));
+
+    // Some panels answer with a web page or plain text instead of JSON — usually
+    // because they block the User-Agent, rate-limit, or the session expired.
+    // Retrying with another known User-Agent fixes the block case; otherwise the
+    // error reports the status and what actually came back, because that is the
+    // only way to tell those causes apart.
+    let mut failure = String::new();
+    for ua in [session.ua.as_str(), UA_VLC, UA_SMARTERS] {
+        let res = client
+            .get(&url)
+            .header("User-Agent", ua)
+            .timeout(Duration::from_secs(60))
+            .send()
+            .await?;
+        let status = res.status();
+        let content_type = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let text = res.text().await?;
+        if text.trim().is_empty() {
+            return Ok(Value::Array(vec![]));
+        }
+        match serde_json::from_str(&text) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                failure = format!(
+                    "HTTP {} · {} · \"{}\" · {}",
+                    status.as_u16(),
+                    if content_type.is_empty() {
+                        "ohne Content-Type"
+                    } else {
+                        &content_type
+                    },
+                    snippet(&text, 120),
+                    e
+                );
+            }
+        }
     }
-    serde_json::from_str(&text).map_err(|e| anyhow!("Response from '{action}' not readable: {e}"))
+    Err(anyhow!("Response from '{action}' not readable ({failure})"))
 }
 
 pub async fn categories(client: &reqwest::Client, session: &Session, kind: &str) -> Result<Vec<Category>> {
@@ -781,5 +822,22 @@ fn split_cast(raw: Option<String>) -> Vec<String> {
             .take(24)
             .collect(),
         None => vec![],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snippet;
+
+    /// The excerpt ends up in a user-visible error message, so it must stay on
+    /// one line and stay short.
+    #[test]
+    fn snippet_collapses_whitespace_and_caps() {
+        assert_eq!(
+            snippet("  <html>\n  <body>x</body>  ", 40),
+            "<html> <body>x</body>"
+        );
+        assert_eq!(snippet("kurz", 40), "kurz");
+        assert_eq!(snippet(&"a".repeat(200), 10), "aaaaaaaaaa…");
     }
 }
