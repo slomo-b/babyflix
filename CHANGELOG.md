@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.8] — 2026-10-20
+
+### Added
+- **Search results as a full grid.** Movies and series are no longer shown in a horizontal carousel
+  where only a handful were visible and you had to page through with arrows: they are now a
+  responsive grid with 60 hits per page, the total count in the header and a "Show more" button.
+  Stations stay a carousel — they are channels, not posters.
+
+### Fixed
+- **A series or film page opens even when the provider sends no detail data.** If the panel answers
+  `get_series_info` / `get_vod_info` with a web page instead of JSON (broken id, blocked
+  user-agent, rate limit, expired session), the page used to end in a red error box although the
+  title is in the catalog and playable. The route now falls back to the catalog entry and marks the
+  response as incomplete; the detail page shows a hint that description and episodes are missing,
+  and playback still works.
+- **Non-JSON responses are now diagnosable.** The error reports the HTTP status, the content type
+  and a 120-character excerpt of the body; before, it only said "not readable". On a parse failure
+  the request is retried once with the known alternative user-agents (VLC, IPTV Smarters), because
+  many panels block the browser one.
+
+### Changed
+- **The release workflow builds macOS first.** The matrix is limited to two parallel jobs, so both
+  macOS targets finish before Linux and Windows start.
+
 ## [1.5.7] — 2026-10-17
 
 ### Fixed

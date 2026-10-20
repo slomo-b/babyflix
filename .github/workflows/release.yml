@@ -13,6 +13,11 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # macOS zuerst: die Matrix startet in der Reihenfolge unten, und mit zwei
+      # parallelen Jobs sind beide macOS-Ziele fertig, bevor Linux und Windows
+      # beginnen. Ohne Limit laufen alle vier gleichzeitig und macOS - der
+      # langsamste - wird als letztes fertig.
+      max-parallel: 2
       matrix:
         include:
           # macOS – Apple Silicon

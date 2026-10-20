@@ -4,6 +4,19 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.8
+
+- 🔎 **Search results as a full grid.** Movies and series are no longer squeezed into a horizontal
+  carousel where only a handful were visible and you had to page through with arrows — you now get a
+  responsive grid, **60 hits per page**, the total count in the header and a "Show more" button.
+- 🩹 **A title opens even when the provider sends no details.** If a panel answers with a web page
+  instead of data (broken id, blocked request, rate limit), the page now falls back to what the
+  catalog knows and tells you that description and episodes are missing — instead of a red error
+  box. Playback still works.
+- 🔍 **Better error messages.** When a panel returns something unreadable, the message now names the
+  HTTP status, the content type and an excerpt of what actually came back, and the request is
+  retried once with an alternative user-agent (many panels block browsers).
+
 ## 🆕 What's new in 1.5.7
 
 - ⏭️ **You can now jump to any position in a film.** Seeking used to be limited to the part FFmpeg
