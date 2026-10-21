@@ -891,7 +891,8 @@ async fn streams(State(app): State<Arc<App>>, Query(q): Query<StreamsQ>) -> ApiR
         .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
     let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
     let app2 = app.clone();
-    let info = tokio::task::spawn_blocking(move || app2.remux.probe_streams(&url))
+    let is_live = q.kind == "live";
+    let info = tokio::task::spawn_blocking(move || app2.remux.probe_streams(&url, is_live))
         .await
         .map_err(|e| ApiError(e.to_string()))?
         .map_err(ApiError::from)?;
@@ -913,6 +914,11 @@ async fn hls_file(
         if path.exists() {
             found = true;
             break;
+        }
+        // Ist FFmpeg schon gestorben, kommt das Segment nie - dann lieber sofort
+        // melden, statt 30 Sekunden zu warten.
+        if let Some(reason) = app.remux.ended(&token) {
+            return Err(ApiError(format!("Aufbereitung abgebrochen: {reason}")));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }

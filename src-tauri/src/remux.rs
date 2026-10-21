@@ -464,7 +464,43 @@ impl Remux {
         }
     }
 
-    fn probe_json(&self, url: &str) -> Option<Value> {
+    /// Runs a command and gives up after `secs`.
+    ///
+    /// `Command::output()` alone can block forever on a stalled stream - exactly
+    /// what a slow live channel does - and with it the whole request that started
+    /// playback.
+    fn output_with_timeout(cmd: &mut Command, secs: u64) -> Option<std::process::Output> {
+        let mut child = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            match child.try_wait().ok()? {
+                Some(status) => {
+                    let mut stdout = Vec::new();
+                    if let Some(mut pipe) = child.stdout.take() {
+                        let _ = pipe.read_to_end(&mut stdout);
+                    }
+                    return Some(std::process::Output {
+                        status,
+                        stdout,
+                        stderr: Vec::new(),
+                    });
+                }
+                None if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                None => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+    }
+
+    fn probe_json(&self, url: &str, live: bool) -> Option<Value> {
         let ffprobe = self.ffprobe.read().unwrap().clone()?;
         let mut cmd = Command::new(ffprobe);
         cmd.arg("-v")
@@ -472,20 +508,24 @@ impl Remux {
             .arg("-show_streams")
             .arg("-show_format")
             .arg("-of")
-            .arg("json")
-            .arg("-user_agent")
-            .arg(UA)
-            .arg(url);
+            .arg("json");
+        if live {
+            // A live stream never ends, so ffprobe would keep reading. A small
+            // probe window plus a hard timeout keeps the start fast; if it gives
+            // up, the conservative copy policy applies instead.
+            cmd.args(["-probesize", "2000000", "-analyzeduration", "2000000"]);
+        }
+        cmd.arg("-user_agent").arg(UA).arg(url);
         hidden(&mut cmd);
-        let out = cmd.output().ok()?;
+        let out = Self::output_with_timeout(&mut cmd, if live { 6 } else { 20 })?;
         if !out.status.success() {
             return None;
         }
         serde_json::from_slice(&out.stdout).ok()
     }
 
-    pub fn probe_streams(&self, url: &str) -> Result<Value> {
-        let v = self.probe_json(url).ok_or_else(|| anyhow!("ffprobe failed"))?;
+    pub fn probe_streams(&self, url: &str, live: bool) -> Result<Value> {
+        let v = self.probe_json(url, live).ok_or_else(|| anyhow!("ffprobe failed"))?;
         let mut out = streams_from(&v);
         out["duration"] = serde_json::json!(duration_of(&v));
         Ok(out)
@@ -519,7 +559,7 @@ impl Remux {
                     let tok2 = tok.clone();
                     let offset = sess.offset;
                     drop(s);
-                    let info = self.probe_json(url);
+                    let info = self.probe_json(url, live);
                     let streams = info
                         .as_ref()
                         .map(streams_from)
@@ -558,7 +598,7 @@ impl Remux {
             self.stop(&t);
         }
 
-        let info = self.probe_json(url);
+        let info = self.probe_json(url, live);
         let streams = info
             .as_ref()
             .map(streams_from)
@@ -677,6 +717,18 @@ impl Remux {
     /// Decision of the most recently started session (`copy` vs `transcode`).
     pub fn last_decision(&self) -> Option<Value> {
         self.last_decision.read().unwrap().clone()
+    }
+
+    /// Has this session's FFmpeg process already ended? Returns a short reason
+    /// with its exit status, so callers can fail fast instead of waiting for
+    /// segments that will never be written.
+    pub fn ended(&self, token: &str) -> Option<String> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let session = sessions.get_mut(token)?;
+        match session.child.try_wait() {
+            Ok(Some(status)) => Some(format!("FFmpeg beendet ({status})")),
+            _ => None,
+        }
     }
 
     pub fn touch(&self, token: &str) {

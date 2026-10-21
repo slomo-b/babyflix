@@ -113,7 +113,10 @@ pub async fn proxy(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    if is_m3u8(url, ct.as_deref()) {
+    // Only rewrite a playlist that actually is one. An error page (403/404 HTML
+    // from a blocked or expired request) must keep its status, otherwise hls.js
+    // parses the error body as a playlist and reports a meaningless parse error.
+    if status.is_success() && is_m3u8(url, ct.as_deref()) {
         let text = resp.text().await?;
         let rewritten = rewrite_m3u8(origin, url, &text);
         return Ok(Response::builder()
