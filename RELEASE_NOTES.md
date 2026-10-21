@@ -4,6 +4,16 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.9
+
+- 🎲 **"Random episode" on the end card.** At the end of an episode you can now pick a random other
+  episode of the same series instead of only the next one — across all seasons, and never the episode
+  that just finished. The next-episode chain still works, so autoplay carries on from there.
+- 📺 **Live TV no longer hangs indefinitely.** Three causes were fixed: the probe before the FFmpeg
+  conversion had no timeout (a stalling channel could block it forever), the proxy turned error pages
+  into "valid" playlists (so the player could not react), and a converter that died kept the player
+  waiting 30 seconds for segments that never came. Failures now surface quickly instead of spinning.
+
 ## 🆕 What's new in 1.5.8
 
 - 🔎 **Search results as a full grid.** Movies and series are no longer squeezed into a horizontal

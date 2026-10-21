@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.5.9] — 2026-10-22
+
+### Added
+- **"Random episode" on the end card.** When an episode ends and BabyFlix offers the next one, there
+  is now a third option: play a random other episode of the same series — across all seasons, and
+  never the episode that just finished. The normal next-episode chain stays intact, so autoplay
+  continues from the randomly picked episode onwards.
+
+### Fixed
+- **Live TV that hung instead of failing.** Three concrete causes:
+  - The `ffprobe` that precedes the FFmpeg live remux had **no timeout**; a stalling channel could
+    block it indefinitely and the player spun forever. It now runs with a 2 MB / 2 s probe window and
+    a hard 6 s timeout (20 s for VOD) and is killed when it exceeds it — the conservative copy policy
+    applies instead.
+  - The streaming proxy **rewrote error responses into playlists**: an HTML 403/404 answering a
+    `.m3u8` request came back as a "valid" playlist with status 200, so hls.js parsed garbage and the
+    fallback logic could not react. Only successful responses are rewritten now; errors keep their
+    status and body.
+  - When FFmpeg died while preparing a stream, the segment route kept polling for 30 s for a file
+    that would never appear. It now notices the ended process and reports its exit status
+    immediately.
+
 ## [1.5.8] — 2026-10-20
 
 ### Added

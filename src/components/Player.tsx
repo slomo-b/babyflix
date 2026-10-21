@@ -10,6 +10,7 @@ import {
   Play,
   RotateCcw,
   Settings2,
+  Shuffle,
   SkipBack,
   SkipForward,
   Volume2,
@@ -171,6 +172,8 @@ export function Player() {
 
   // Endkarte („Nächste Folge") am Episodenende + Automatik-Countdown.
   const [endMode, setEndMode] = useState<null | "next" | "done">(null);
+  /** Lädt gerade eine Zufallsfolge für die Endkarte? */
+  const [randomBusy, setRandomBusy] = useState(false);
   const [endIn, setEndIn] = useState(0);
   const endTickRef = useRef<number | null>(null);
   const endInRef = useRef(0);
@@ -630,6 +633,52 @@ export function Player() {
     setEndIn(0);
     setEndMode(null);
   }, []);
+
+  /**
+   * Endkarte: statt der nächsten Folge eine zufällige andere Folge derselben
+   * Serie starten. Die Folgenliste wird frisch geholt, damit die Auswahl alle
+   * Staffeln umfasst und nicht nur die gerade gespielte.
+   */
+  const playRandom = useCallback(async () => {
+    const c = current;
+    if (!c || c.kind !== "series" || !c.seriesId || randomBusy) return;
+    setRandomBusy(true);
+    try {
+      const d = await api.detail("series", c.seriesId);
+      const all = (d.seasons ?? []).flatMap((s) =>
+        (s.episodes ?? []).map((e) => ({ ...e, season: s.number }))
+      );
+      const pool = all.filter((e) => e.id !== c.id);
+      if (!pool.length) return;
+      const ep = pool[Math.floor(Math.random() * pool.length)];
+      const i = all.findIndex((e) => e.id === ep.id);
+      const next = i >= 0 ? all[i + 1] : undefined;
+      cancelEnd();
+      play({
+        kind: "series",
+        id: ep.id,
+        ext: ep.extension,
+        title: c.title,
+        poster: ep.cover ?? c.poster,
+        subtitle: `S${ep.season} · E${ep.num} – ${ep.title}`,
+        historyKey: `series:${ep.id}`,
+        seriesId: c.seriesId,
+        next: next
+          ? {
+              kind: "series",
+              id: next.id,
+              ext: next.extension,
+              title: c.title,
+              subtitle: `S${next.season} · E${next.num} – ${next.title}`,
+            }
+          : undefined,
+      });
+    } catch {
+      /* ohne Antwort bleibt die Endkarte stehen */
+    } finally {
+      setRandomBusy(false);
+    }
+  }, [current, play, cancelEnd, randomBusy]);
 
   /** Countdown am Ende: zählt runter und startet dann die nächste Folge. */
   const startCountdown = useCallback(() => {
@@ -1278,6 +1327,15 @@ export function Player() {
               ) : (
                 <button className="btn btn-primary px-4 py-2 text-sm" onClick={restart}>
                   <RotateCcw size={16} /> {t("player.replay")}
+                </button>
+              )}
+              {current.kind === "series" && current.seriesId && (
+                <button
+                  className="btn btn-ghost px-3 py-2 text-sm"
+                  onClick={() => void playRandom()}
+                  disabled={randomBusy}
+                >
+                  <Shuffle size={16} /> {t("player.randomNext")}
                 </button>
               )}
               <button className="btn btn-ghost ml-auto px-3 py-2 text-sm" onClick={cancelEnd}>
