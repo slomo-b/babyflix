@@ -52,6 +52,27 @@ fn cmp_rating(a: &MediaItem, b: &MediaItem) -> Ordering {
         .unwrap_or(Ordering::Equal)
 }
 
+/// Language prefix some panels put in front of a title ("DE - …", "AT| …",
+/// "US (Paramount 062) | …"). Only two uppercase letters followed by a separator
+/// count, so ordinary titles are not mistaken for a language.
+fn name_lang(name: &str) -> Option<String> {
+    let head = name
+        .split(|c: char| c == '-' || c == '|')
+        .next()?
+        .trim();
+    let mut chars = head.chars();
+    let a = chars.next()?;
+    let b = chars.next()?;
+    if !(a.is_ascii_uppercase() && b.is_ascii_uppercase()) {
+        return None;
+    }
+    match chars.next() {
+        None => Some(format!("{a}{b}")),
+        Some(c) if c == ' ' || c == '(' => Some(format!("{a}{b}")),
+        _ => None,
+    }
+}
+
 /// Seed for the banner shuffle - it only has to differ between requests.
 fn seed_from_clock() -> u64 {
     std::time::SystemTime::now()
@@ -307,6 +328,9 @@ async fn browse(State(app): State<Arc<App>>, Query(bq): Query<BrowseQ>) -> ApiRe
 struct HomeQ {
     #[serde(default)]
     hide_adult: Option<bool>,
+    /// Restrict the banner to one language prefix ("DE", "EN", …).
+    #[serde(default)]
+    lang: Option<String>,
 }
 
 async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult {
@@ -340,12 +364,46 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
         })
         .collect();
     top.sort_by(|a, b| cmp_rating(a, b));
-    let top: Vec<&MediaItem> = top.into_iter().take(30).collect();
+    let top: Vec<&MediaItem> = top.iter().copied().take(30).collect();
     // The banner shows a *different* handful of the "top rated" row on every load
-    // instead of always the same first six films.
-    let mut pool: Vec<&MediaItem> = top.clone();
+    // instead of always the same first six films - optionally restricted to one
+    // language prefix. The row itself stays mixed.
+    let want_lang = q
+        .lang
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty());
+    let mut pool: Vec<&MediaItem> = match want_lang {
+        Some(lang) => top
+            .iter()
+            .copied()
+            .filter(|i| name_lang(&i.name).as_deref() == Some(lang))
+            .collect(),
+        None => top.clone(),
+    };
+    if pool.is_empty() {
+        // Nothing of that language in the row - never leave the banner empty.
+        pool = top.clone();
+    }
     shuffle(&mut pool, seed_from_clock());
     let hero: Vec<&MediaItem> = pool.into_iter().take(6).collect();
+
+    // Language prefixes the panel uses ("DE - …", "AT| …"), sampled from the
+    // catalog so the selector only offers what actually exists.
+    let langs: Vec<Value> = {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for it in vod.iter().take(20_000) {
+            if let Some(l) = name_lang(&it.name) {
+                *counts.entry(l).or_insert(0) += 1;
+            }
+        }
+        let mut list: Vec<(String, usize)> = counts.into_iter().collect();
+        list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        list.into_iter()
+            .take(24)
+            .map(|(code, count)| json!({ "code": code, "count": count }))
+            .collect()
+    };
 
     let mut s: Vec<&MediaItem> = series
         .iter()
@@ -403,7 +461,7 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
         rows.push(json!({ "title": null, "category_id": cid, "kind": "movie", "items": items }));
     }
 
-    Ok(Json(json!({ "hero": hero, "rows": rows })))
+    Ok(Json(json!({ "hero": hero, "rows": rows, "langs": langs })))
 }
 
 // ---------------- detail ----------------
@@ -977,10 +1035,23 @@ pub fn router(app: Arc<App>) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use super::shuffle;
+    use super::{name_lang, shuffle};
 
     /// The banner picks a random subset, so the shuffle must be a real
     /// permutation - never lose or duplicate an entry.
+    #[test]
+    fn language_prefixes_are_recognised_only_at_the_front() {
+        assert_eq!(name_lang("DE - South Park (1997) (US)").as_deref(), Some("DE"));
+        assert_eq!(name_lang("EN - A Make or Break Holiday (2025)").as_deref(), Some("EN"));
+        assert_eq!(name_lang("AT| DAS ERSTE HD").as_deref(), Some("AT"));
+        assert_eq!(name_lang("US (Paramount 062) | Hajduk Split").as_deref(), Some("US"));
+        assert_eq!(name_lang("SW| SRF 1 FHD").as_deref(), Some("SW"));
+        // Ordinary titles must not look like a language.
+        assert_eq!(name_lang("The Matrix (1999)"), None);
+        assert_eq!(name_lang("Up - Above"), None);
+        assert_eq!(name_lang(""), None);
+    }
+
     #[test]
     fn shuffle_is_a_permutation() {
         let base: Vec<u32> = (0..30).collect();

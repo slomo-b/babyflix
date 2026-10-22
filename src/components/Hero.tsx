@@ -4,13 +4,22 @@ import { imgUrl, MediaItem } from "../lib/api";
 import { asRating, fmtVotes, yearFromTitle } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { useEnrichment } from "../lib/useEnrichment";
+import { Select } from "./Select";
 
 export function Hero({
   items,
+  langs,
+  lang,
+  onLang,
   onPlay,
   onOpen,
 }: {
   items: MediaItem[];
+  /** Language prefixes the panel uses in titles ("DE", "EN", …). */
+  langs?: { code: string; count: number }[];
+  /** Selected prefix ("" = all languages). */
+  lang?: string;
+  onLang?: (v: string) => void;
   onPlay: (item: MediaItem) => void;
   onOpen: (item: MediaItem) => void;
 }) {
@@ -50,6 +59,22 @@ export function Hero({
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-[#08090d] via-[#08090d]/85 to-[#08090d]/20" />
       <div className="absolute inset-0 bg-gradient-to-r from-[#08090d] via-[#08090d]/60 to-transparent" />
+
+      {/* Sprachauswahl für die Empfehlungen - klein, oben rechts. */}
+      {langs && langs.length > 1 && onLang && (
+        <div className="absolute right-5 top-5 z-10">
+          <Select
+            value={lang ?? ""}
+            onChange={onLang}
+            ariaLabel={t("hero.language")}
+            className="w-24"
+            options={[
+              { value: "", label: t("hero.allLanguages") },
+              ...langs.map((l) => ({ value: l.code, label: l.code })),
+            ]}
+          />
+        </div>
+      )}
 
       <div className="relative flex min-h-[430px] items-end gap-8 p-10">
         {bg && (

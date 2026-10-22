@@ -98,6 +98,8 @@ export interface HomeRow {
 export interface HomeResponse {
   hero: MediaItem[];
   rows: HomeRow[];
+  /** Language prefixes the panel uses in titles ("DE", "EN", …). */
+  langs?: { code: string; count: number }[];
 }
 
 export interface BrowseResponse {
@@ -275,7 +277,11 @@ export const api = {
     sp.set("hide_adult", hideAdultParam());
     return req<BrowseResponse>(`/api/browse?${sp.toString()}`);
   },
-  home: () => req<HomeResponse>(`/api/home?hide_adult=${hideAdultParam()}`),
+  home: (lang?: string) => {
+    const sp = new URLSearchParams({ hide_adult: hideAdultParam() });
+    if (lang) sp.set("lang", lang);
+    return req<HomeResponse>(`/api/home?${sp.toString()}`);
+  },
   detail: (kind: "movie" | "series", id: string) =>
     req<DetailResponse>(`/api/detail?kind=${kind}&id=${encodeURIComponent(id)}`),
   epg: (streamId: string, full = false, limit = 12, channelId?: string) => {

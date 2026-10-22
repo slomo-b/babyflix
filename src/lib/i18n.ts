@@ -102,6 +102,8 @@ const de: Record<string, string> = {
 
   // hero
   "hero.recommended": "Empfohlen",
+  "hero.language": "Sprache der Empfehlungen",
+  "hero.allLanguages": "Alle",
 
   // catalog
   "catalog.filter": "Filtern…",
@@ -360,6 +362,8 @@ const en: Record<string, string> = {
   "row.next": "Next",
 
   "hero.recommended": "Recommended",
+  "hero.language": "Language of the recommendations",
+  "hero.allLanguages": "All",
 
   "catalog.filter": "Filter…",
   "catalog.searchCategories": "Search categories…",

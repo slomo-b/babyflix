@@ -105,6 +105,10 @@ interface AppStore {
   categorySidebarOpen: boolean;
   setCategorySidebarOpen: (v: boolean) => void;
 
+  /** Sprachpräfix für den Startseiten-Banner ("" = alle Sprachen). */
+  heroLang: string;
+  setHeroLang: (v: string) => void;
+
   /** Remembered login, so the user stays signed in until the account is removed. */
   savedLogin: SavedLogin | null;
   setSavedLogin: (v: SavedLogin | null) => void;
@@ -157,6 +161,9 @@ export const useStore = create<AppStore>()(
       categorySidebarOpen: true,
       setCategorySidebarOpen: (v) => set({ categorySidebarOpen: v }),
 
+      heroLang: "",
+      setHeroLang: (v) => set({ heroLang: v }),
+
       savedLogin: null,
       setSavedLogin: (v) => set({ savedLogin: v }),
     }),
@@ -177,6 +184,7 @@ export const useStore = create<AppStore>()(
         autoResume: s.autoResume,
         hideAdult: s.hideAdult,
         categorySidebarOpen: s.categorySidebarOpen,
+        heroLang: s.heroLang,
         savedLogin: s.savedLogin,
       }),
     }

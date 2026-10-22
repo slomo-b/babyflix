@@ -64,7 +64,12 @@ function ContinueCard({
 export default function Home() {
   const t = useT();
   const navigate = useNavigate();
-  const home = useQuery({ queryKey: ["home"], queryFn: api.home });
+  const heroLang = useStore((s) => s.heroLang);
+  const setHeroLang = useStore((s) => s.setHeroLang);
+  const home = useQuery({
+    queryKey: ["home", heroLang],
+    queryFn: () => api.home(heroLang || undefined),
+  });
   const cats = useQuery({ queryKey: ["cats", "movie"], queryFn: () => api.categories("movie") });
   const { open, playItem } = useOpen();
   const history = useStore((s) => s.history);
@@ -121,7 +126,14 @@ export default function Home() {
 
   return (
     <div className="animate-fade-in pt-6">
-      <Hero items={data.hero} onPlay={playItem} onOpen={open} />
+      <Hero
+        items={data.hero}
+        langs={data.langs}
+        lang={heroLang}
+        onLang={setHeroLang}
+        onPlay={playItem}
+        onOpen={open}
+      />
 
       {continueItems.length > 0 && (
         <section className="mb-9">
