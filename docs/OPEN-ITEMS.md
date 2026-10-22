@@ -88,14 +88,32 @@ The "stops and jumps a few seconds back" symptom had two separate causes, both
 retry paths: `recoverMediaError()` (flushes the buffer, restarts at the fragment
 start) and `startLoad()` without a position (falls back to the live sync point).
 
-### Catalogue survey (sampled, not all 52,782)
+### Catalogue survey (250 sampled of 52,782)
 
 Live entries were probed through the app's own `/api/player` (ffprobe with
-`-extension_picky false`, because the proxy URLs have no file extension). Results so
-far: the overwhelming majority is **H.264 + AAC** and plays. Failures are almost all
-the provider's `NO EVENT STREAMING` event placeholders (**6,856** entries, 13 % of
-the catalogue) plus dead upstream channels — neither is fixable client-side.
-`NO EVENT STREAMING` entries are now dropped from the catalogue.
+`-extension_picky false`, because the proxy URLs have no file extension). **The first
+run used `-probesize 3M -analyzeduration 4M` and reported working channels as broken**
+(e.g. `LT| 3PLUS`); with default probing it plays. Always probe with the defaults.
+
+Final numbers (sequential re-checks confirmed the timeouts are real — 8 of 8 returned
+"Invalid data" after 11 s even without parallel load):
+
+| | count |
+|---|---|
+| playable | 157 (63 %) |
+| dead upstream / event placeholder | 93 (37 %) |
+| H.264 + AAC | 139 of the 157 |
+| HEVC + AAC | 6 |
+| H.264 + MP2 | 4 |
+| H.264 + AC-3/E-AC-3 | 5 |
+| HEVC + AC-3 | 1 |
+
+The dead third is not fixable client-side: those entries carry no stream at all
+(`NO EVENT STREAMING`, `(FLSP 123) | hockey: …`, `:TeliaPlay SE 93`, radio links that
+answer 5xx). The codec exceptions are covered by the generic rules — parse error on
+live → FFmpeg path; `copy_actions` decides VOD by the webview's own report. MP2 is
+accepted by hls.js but WebKit cannot decode it, which surfaces as a fatal media error
+and therefore takes the same FFmpeg path.
 
 Duplicate names (1,587) are not a systematic problem and were not exploited for
 fallbacks.
