@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.11
+
+- 📺 **Live TV works again — with a proven cause.** Panels hand live streams over to a CDN via a
+  redirect, and the playlist addresses its segments with root-relative paths. BabyFlix resolved
+  those against the *original panel address* instead of the redirect target, so **every** segment
+  request was answered with `403` — for every channel. Measured: `403` from the panel host, `200`
+  and 9.6 MB from the CDN. Fixed, plus a regression test.
+  Films and series were unaffected because FFmpeg follows redirects itself.
+
 ## 🆕 What's new in 1.5.10
 
 - ❤️ **"Likes" sits right under Home.** Your watchlist moved up in the sidebar and has a clearer

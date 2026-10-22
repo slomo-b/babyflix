@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.5.11] — 2026-10-22
+
+### Fixed
+- **Live TV works again — and this time the cause is proven.** Panels answer a channel URL with a
+  `302` to a CDN, and the delivered HLS playlist addresses its segments with root-relative paths
+  (`/hls/<hash>/…`). The streaming proxy resolved those against the **originally requested** URL
+  (the panel host) instead of the redirect target, so **every** segment request was answered with
+  `403` and live playback failed for every channel.
+
+  Measured on the affected panel (SRF 1 HD):
+
+  | Segment requested from | Response |
+  |---|---|
+  | panel host | `403` · `text/html` · 0 bytes |
+  | CDN host (redirect target) | `200` · `video/mp2t` · 9.6 MB |
+
+  The proxy now resolves playlists against the response's effective URL, with a regression test
+  covering root-relative and relative paths.
+
+  This also explains why films and series kept working: FFmpeg follows redirects itself and never
+  uses the playlist rewriter. The three hang scenarios fixed in 1.5.9 were real, but not this bug.
+  The panel's one-connection limit (`max_connections: 1`) was ruled out: parallel segment fetches
+  work fine.
+
 ## [1.5.10] — 2026-10-22
 
 ### Added
