@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.12] — 2026-10-22
+
+### Added
+- **A language picker for the recommendations banner.** Panels list the same title several times with
+  a language prefix ("DE - …", "EN - …", "AT| …"), so the banner mixed them. A small selector in the
+  top-right corner restricts it to one language and remembers the choice. The available prefixes are
+  read from the panel's catalog (sampled), and the filtering happens server-side so the banner always
+  has six films — an empty selection falls back to the unfiltered pool. The "Top rated" row stays
+  mixed on purpose.
+
+### Fixed
+- **"End of series" appeared at the end of an episode that was not the last one.** Starting an episode
+  from "Continue watching" on the home page dropped the series id, so the player could not resolve the
+  next episode: no up-next banner, no random episode, and an end card claiming the series had ended
+  (observed at South Park S25E2 although the panel delivers up to S28). The series id is passed along
+  now, and when it is missing the series is looked up by exact title in the catalog, so older history
+  entries work too. The chain crosses season boundaries (S25E6 → S26E1), and "End of series" appears
+  only at the real end — where a random episode is the remaining choice.
+
 ## [1.5.11] — 2026-10-22
 
 ### Fixed

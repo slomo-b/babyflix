@@ -4,6 +4,18 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.12
+
+- 🌍 **Pick the language of the recommendations.** Panels list the same title several times with a
+  language prefix ("DE - …", "EN - …", "AT| …"), so the banner used to mix them. A small selector in
+  the top-right corner restricts it to one language and remembers your choice. The list is read from
+  your own catalog, so only languages you actually have are offered.
+- 🔗 **"End of series" no longer appears too early.** Starting an episode from "Continue watching"
+  dropped the series id, so the player could not find the next episode — no up-next banner, no random
+  episode, and an end card claiming the series had ended (e.g. South Park S25E2 although the panel
+  has S28). The chain now crosses seasons (S25E6 → S26E1); only at the real end does the random
+  episode remain the choice.
+
 ## 🆕 What's new in 1.5.11
 
 - 📺 **Live TV works again — with a proven cause.** Panels hand live streams over to a CDN via a
