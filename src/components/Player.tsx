@@ -395,12 +395,25 @@ export function Player() {
               )
               .then((subs) => {
                 if (cancelled) return;
+                // Deutsch und Englisch zuerst, in der Reihenfolge der
+                // Oberflächensprache - der Rest bleibt erreichbar.
+                const pref = appLang === "de" ? ["de", "en"] : ["en", "de"];
+                const rank = (lang?: string) => {
+                  const l = (lang || "").slice(0, 2).toLowerCase();
+                  const at = pref.indexOf(l);
+                  return at === -1 ? pref.length : at;
+                };
                 setSubTrax(
-                  subs.tracks.map((track, i) => ({
-                    url: track.url,
-                    label: textSubs[i]?.title || textSubs[i]?.lang || `Untertitel ${i + 1}`,
-                    lang: textSubs[i]?.lang ?? undefined,
-                  }))
+                  subs.tracks
+                    .map((track, i) => {
+                      const info = textSubs[i];
+                      return {
+                        url: track.url,
+                        label: info?.title || langName(info?.lang ?? undefined) || `Untertitel ${i + 1}`,
+                        lang: info?.lang ?? undefined,
+                      };
+                    })
+                    .sort((a, b) => rank(a.lang) - rank(b.lang))
                 );
               })
               .catch(() => undefined); // ohne Untertitel weiterspielen
@@ -1181,8 +1194,8 @@ export function Player() {
                   active={NATIVE_SUB_BASE + i === subtitleIndex}
                   onClick={() => selectSubtitle(NATIVE_SUB_BASE + i)}
                 >
+                  {/* Label enthält die Sprache bereits (z.B. "Deutsch"). */}
                   {s.label}
-                  {langName(s.lang) ? ` (${langName(s.lang)})` : ""}
                 </TrackRow>
               ))}
             </TrackGroup>
