@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { API_BASE, playerUrl } from "../lib/api";
 import { api } from "../lib/api";
-import { useStore } from "../lib/store";
+import { useStore, PlayNext } from "../lib/store";
 import { fmtTime, fmtTimeClock } from "../lib/format";
 import { useLang, useT } from "../lib/i18n";
 
@@ -174,6 +174,13 @@ export function Player() {
   const [endMode, setEndMode] = useState<null | "next" | "done">(null);
   /** Lädt gerade eine Zufallsfolge für die Endkarte? */
   const [randomBusy, setRandomBusy] = useState(false);
+  /**
+   * Nächste Folge, wenn `current.next` fehlt - das passiert nach „Jetzt
+   * abspielen", weil dieser Sprung die Kette nicht kennt. Wird aus der
+   * Serien-Detailantwort nachgeladen.
+   */
+  const [resolvedNext, setResolvedNext] = useState<PlayNext | null>(null);
+  const nextEp = current?.next ?? resolvedNext;
   const [endIn, setEndIn] = useState(0);
   const endTickRef = useRef<number | null>(null);
   const endInRef = useRef(0);
@@ -570,6 +577,42 @@ export function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamKey, remuxAudio, forceRemux, liveRemuxFor, seekNonce, reloadKey]);
 
+  /**
+   * Fehlt `current.next` (z.B. nach „Jetzt abspielen" oder nach einer
+   * Zufallsfolge), wird die nächste Folge aus der Serie nachgeladen - sonst
+   * bliebe der „Als Nächstes"-Streifen und die Automatik nach einer Folge stehen.
+   */
+  useEffect(() => {
+    const c = current;
+    setResolvedNext(null);
+    if (!c || c.kind !== "series" || c.next || !c.seriesId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const d = await api.detail("series", c.seriesId as string);
+        const all = (d.seasons ?? []).flatMap((s) =>
+          (s.episodes ?? []).map((e) => ({ ...e, season: s.number }))
+        );
+        const i = all.findIndex((e) => e.id === c.id);
+        const n = i >= 0 ? all[i + 1] : undefined;
+        if (cancelled || !n) return;
+        setResolvedNext({
+          kind: "series",
+          id: n.id,
+          ext: n.extension,
+          title: c.title,
+          subtitle: `S${n.season} · E${n.num} – ${n.title}`,
+        });
+      } catch {
+        /* ohne Antwort bleibt es beim Folgenende */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, current?.seriesId, current?.next]);
+
   const persist = useCallback(
     (pos: number, dur: number) => {
       if (!current) return;
@@ -605,7 +648,7 @@ export function Player() {
 
   /** „Jetzt abspielen" im Als-Nächstes-Band. */
   const goNextNow = useCallback(() => {
-    const nx = current?.next;
+    const nx = nextEp;
     if (!nx || !current) return;
     play({
       kind: nx.kind,
@@ -615,8 +658,11 @@ export function Player() {
       subtitle: nx.subtitle,
       poster: current.poster,
       historyKey: `${nx.kind}:${nx.id}`,
+      // Ohne die Serien-ID ginge im nächsten Player die Zufallsfolge und die
+      // Automatik verloren.
+      seriesId: current.seriesId,
     });
-  }, [current, play]);
+  }, [current, nextEp, play]);
 
   const toggle = useCallback(() => {
     const v = videoRef.current;
@@ -726,16 +772,16 @@ export function Player() {
   /** Am Folgenende: Endkarte öffnen (mit Countdown, wenn die Automatik aktiv ist). */
   const openEndCard = useCallback(() => {
     if (!current || current.kind === "live" || endShownRef.current) return;
-    if (!current.next && current.kind !== "series") return;
+    if (!nextEp && current.kind !== "series") return;
     endShownRef.current = true;
-    setEndMode(current.next ? "next" : "done");
-    if (current.next && autoplayNext && !autoOffRef.current) {
+    setEndMode(nextEp ? "next" : "done");
+    if (nextEp && autoplayNext && !autoOffRef.current) {
       startCountdown();
     } else {
       endInRef.current = 0;
       setEndIn(0);
     }
-  }, [current, autoplayNext, startCountdown]);
+  }, [current, nextEp, autoplayNext, startCountdown]);
 
   // Die Listener im Ladepfad leben länger als ein Render – sie rufen die
   // jeweils aktuelle Fassung über die Ref auf.
@@ -1029,8 +1075,8 @@ export function Player() {
     !endMode &&
     duration > 0 &&
     position >= duration - 20 &&
-    current.next
-      ? current.next
+    nextEp
+      ? nextEp
       : null;
 
   return (
@@ -1253,6 +1299,15 @@ export function Player() {
             <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={goNextNow}>
               <Play size={14} fill="currentColor" /> {t("player.playNext")}
             </button>
+            {current.kind === "series" && current.seriesId && (
+              <button
+                className="btn btn-ghost px-3 py-1.5 text-xs"
+                onClick={() => void playRandom()}
+                disabled={randomBusy}
+              >
+                <Shuffle size={14} /> {t("player.randomNext")}
+              </button>
+            )}
             <button
               className="shrink-0 rounded-full px-2 py-1 text-xs text-white/60 transition hover:text-white"
               onClick={() => {
@@ -1291,7 +1346,7 @@ export function Player() {
                 </div>
                 <div className="mt-1 text-base font-bold leading-snug text-white">
                   {endMode === "next"
-                    ? current.next?.subtitle || current.next?.title
+                    ? nextEp?.subtitle || nextEp?.title
                     : current.title}
                 </div>
                 <div className="mt-0.5 truncate text-xs text-white/55">
