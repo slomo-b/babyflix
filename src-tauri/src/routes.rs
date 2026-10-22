@@ -388,11 +388,12 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
     shuffle(&mut pool, seed_from_clock());
     let hero: Vec<&MediaItem> = pool.into_iter().take(6).collect();
 
-    // Language prefixes the panel uses ("DE - …", "AT| …"), sampled from the
-    // catalog so the selector only offers what actually exists.
+    // Language prefixes the panel uses ("DE - …", "AT| …"). Scanned over the whole
+    // catalog: a sample of the first N items missed whole languages (e.g. DE), and
+    // the cost is only a few milliseconds for 200k titles.
     let langs: Vec<Value> = {
         let mut counts: HashMap<String, usize> = HashMap::new();
-        for it in vod.iter().take(20_000) {
+        for it in vod.iter() {
             if let Some(l) = name_lang(&it.name) {
                 *counts.entry(l).or_insert(0) += 1;
             }
@@ -400,7 +401,7 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
         let mut list: Vec<(String, usize)> = counts.into_iter().collect();
         list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         list.into_iter()
-            .take(24)
+            .take(40)
             .map(|(code, count)| json!({ "code": code, "count": count }))
             .collect()
     };

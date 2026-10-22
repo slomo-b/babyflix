@@ -98,6 +98,17 @@ fn codec_key(codec: &str) -> &str {
     }
 }
 
+/// Audio codecs hls.js can demux out of MPEG-TS.
+///
+/// The live remux feeds its playlist back into hls.js (not into the webview's
+/// native player), and hls.js refuses AC-3/E-AC-3 in MPEG-TS with
+/// "Unsupported EC-3 in M2TS" - even when the platform could decode it. For live
+/// these have to be converted to AAC, otherwise the channel shows a spinner
+/// forever. (Measured on SRF 1 HD, which carries E-AC-3.)
+fn hls_js_compatible_audio(codec: Option<&str>) -> bool {
+    matches!(codec, Some("aac") | Some("mp3") | Some("opus") | Some("vorbis"))
+}
+
 /// What the running webview reported it can decode.
 ///
 /// Built from the report the UI posts to `/api/capabilities` (see
@@ -615,7 +626,11 @@ impl Remux {
         // What FFmpeg will be told to do. Recorded for diagnostics: without a test
         // provider this is the only way to see whether a stream was copied or
         // re-encoded - and which codec forced the re-encode.
-        let (video_copy, audio_copy) = copy_actions(&vcodec, acodec.as_deref(), caps);
+        let (video_copy, mut audio_copy) = copy_actions(&vcodec, acodec.as_deref(), caps);
+        // Live goes back through hls.js, so only codecs it can demux are copied.
+        if live && audio_copy && !hls_js_compatible_audio(acodec.as_deref()) {
+            audio_copy = false;
+        }
         let decision = json!({
             "key": key,
             "video_codec": vcodec,
@@ -878,5 +893,28 @@ mod tests {
         assert!(DecodeCaps::from_report(&Value::Null).is_none());
         assert!(DecodeCaps::from_report(&json!({})).is_none());
         assert!(DecodeCaps::from_report(&json!({ "video": {}, "audio": {} })).is_none());
+    }
+
+    /// The live remux playlist is read by hls.js again, and hls.js cannot demux
+    /// AC-3/E-AC-3 out of MPEG-TS ("Unsupported EC-3 in M2TS"), even when the
+    /// webview says it could decode them. Those must become AAC for live.
+    #[test]
+    fn live_audio_that_hls_js_cannot_demux_is_transcoded() {
+        use super::hls_js_compatible_audio;
+        assert!(hls_js_compatible_audio(Some("aac")));
+        assert!(hls_js_compatible_audio(Some("mp3")));
+        assert!(!hls_js_compatible_audio(Some("eac3")));
+        assert!(!hls_js_compatible_audio(Some("ac3")));
+        assert!(!hls_js_compatible_audio(None));
+
+        // With a full probe the policy would copy AC-3/E-AC-3 - for live that is
+        // overridden, so the frontend can actually play it.
+        let caps = DecodeCaps::from_report(&json!({
+            "video": { "h264": { "mse": true } },
+            "audio": { "aac": { "mse": true }, "ac3": { "mse": true }, "eac3": { "mse": true } }
+        }))
+        .expect("report is usable");
+        assert_eq!(copy_actions("h264", Some("eac3"), &caps), (true, true));
+        assert!(!hls_js_compatible_audio(Some("eac3")));
     }
 }

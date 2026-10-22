@@ -303,7 +303,10 @@ export function Player() {
 
     const setupHls = (src: string, onFatal: () => void) => {
       const hls = new Hls({
-        lowLatencyMode: current.kind === "live",
+        // These panels deliver plain HLS with ~10 s segments and a 12 s target
+        // duration - low-latency mode is meant for LL-HLS and only makes the
+        // player chase the live edge (stalls and jumps back).
+        lowLatencyMode: false,
         backBufferLength: 90,
         maxBufferLength: 30,
         enableWorker: true,
@@ -330,11 +333,29 @@ export function Player() {
       let networkRetries = 0;
       let mediaRetries = 0;
       hls.on(Hls.Events.ERROR, (_e, data) => {
+        // hls.js cannot demux AC-3/E-AC-3 audio from MPEG-TS ("Unsupported EC-3 in
+        // M2TS"). Those failures are *not* fatal and repeat for every fragment, so
+        // such a channel would spin forever. FFmpeg demuxes it and converts the
+        // audio to AAC.
+        if (!isVod && !liveRemux && data.details === Hls.ErrorDetails.FRAG_PARSING_ERROR) {
+          setLiveRemuxFor(streamKey);
+          return;
+        }
         if (!data.fatal) return;
+        // Live: a media-error recovery flushes the buffer and restarts at the
+        // beginning of the fragment - on screen that is "stops and goes back a few
+        // seconds". Hand the channel to FFmpeg instead, which starts at the live
+        // edge without touching the buffer.
+        if (!isVod && !liveRemux && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          setLiveRemuxFor(streamKey);
+          return;
+        }
         // Retry a few times (a segment may still be written by FFmpeg), then give up
         // with a visible error instead of spinning forever.
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 4) {
-          hls.startLoad();
+          // Resume at the current position. Without an explicit position hls.js
+          // jumps back to its live sync point, which looks like a rewind.
+          hls.startLoad(video.currentTime > 1 ? video.currentTime : -1);
           return;
         }
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3) {

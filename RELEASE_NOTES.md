@@ -4,6 +4,18 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.14
+
+- 🔊 **Live channels with Dolby sound now play.** SRF 1 HD and other stations with AC-3/E-AC-3 audio
+  could not be opened at all — the player cannot read that audio format out of a live transport
+  stream. Those channels now run through FFmpeg, which converts the sound to AAC. Hajduk TV and other
+  AAC channels are unaffected.
+- ⏯ **No more "stops and jumps back a few seconds" on live TV.** Both retry paths used to restart
+  playback at an earlier point; they now continue where you are. Low-latency mode is off, which fits
+  these channels' long segments.
+- 🇩🇪 **German is selectable again** in the language menu above the recommendations. It was missing
+  because the list was built from only part of the catalogue.
+
 ## 🆕 What's new in 1.5.13
 
 - 📺 **Live channels now start from everywhere.** Opening a channel from the home page or from search

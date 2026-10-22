@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.14] — 2026-10-22
+
+### Fixed
+- **Live channels with Dolby sound (AC-3/E-AC-3) never started.** hls.js cannot demux E-AC-3 out of
+  MPEG-TS and reports exactly that: `Unsupported EC-3 in M2TS`. Those errors are *not* fatal, so the
+  player kept loading instead of trying another path — SRF 1 HD (E-AC-3) hung on the spinner while
+  Hajduk TV (AAC) played. Such channels now go to FFmpeg, which copies the video and converts the
+  audio to AAC. The live remux no longer copies AC-3/E-AC-3 at all, because its playlist is read by
+  hls.js again.
+- **Live playback stopped and jumped a few seconds back.** Two retry paths caused it: a fatal media
+  error called `recoverMediaError()`, which flushes the buffer and restarts at the start of the
+  current fragment (up to ~10 s back); and a network error reloaded from scratch, which falls back to
+  the live sync point. Live media errors now switch to the FFmpeg path, network retries resume at the
+  current position, and low-latency mode is off (these panels are plain HLS with ~10 s segments).
+- **German could not be selected in the language menu above the home recommendations.** The list was
+  built from the first 20,000 catalogue entries, and DE only appears later (14,235 titles). The whole
+  catalogue is scanned now, which costs a few milliseconds.
+
 ## [1.5.13] — 2026-10-22
 
 ### Fixed
