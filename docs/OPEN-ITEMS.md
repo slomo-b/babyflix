@@ -3,28 +3,26 @@
 Things that are investigated or decided but not finished. Kept here so they do not
 get lost between sessions.
 
-## Subtitles in German and English
+## Parked: subtitles in German and English
 
-**Status: partially implemented, never verified.**
+**Status: parked on the user's request (2026-10-22). Not pursued for now.**
+
+Reason: the user has no external subtitle source they can provide (no OpenSubtitles
+account / API key), and the panel does not reliably deliver subtitle tracks. Without
+a source there is nothing to fill in for titles that ship without one, so the
+external-source path is dropped for the moment.
+
+What exists and stays in the code:
 
 - **Embedded text tracks** — several languages at once — are extracted to WebVTT and
   offered in the player's subtitle menu (workstream W4 in `PLAYER-RESEARCH.md`).
   Tracks are ordered German first, then English, following the UI language
-  (commit `2a4fd82`). **This has never run against a real stream.**
-- **Coverage is limited by the source.** If the panel delivers no subtitle track,
-  there is nothing to extract. Image-based subtitles (PGS/VOBSUB, typical for
-  Blu-ray rips) cannot become WebVTT without OCR.
-- **Missing DE/EN subtitles need an external source**: OpenSubtitles API (free
-  account + API key), matching by title and year, plus a manual offset control in
-  the player (±10 s) because third-party subtitles are almost always shifted.
-  That is a 1.6.x feature, not a fix.
+  (commit `2a4fd82`).
+- **Coverage is limited by the source.** No track in the file means no subtitle.
+  Image-based subtitles (PGS/VOBSUB, typical for Blu-ray rips) would need OCR.
 
-**Open questions for the user**
-
-1. Do titles from their panel actually carry DE/EN subtitle tracks? Play a title and
-   open the subtitle menu (gear icon → subtitles). This decides whether an external
-   source is optional or the only path.
-2. Are they willing to create an OpenSubtitles account / API key?
+If the topic comes back, the missing piece is still the same: an OpenSubtitles API key
+plus a manual offset control in the player (±10 s).
 
 ## Live TV hardening (partly done)
 
