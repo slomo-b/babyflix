@@ -29,7 +29,9 @@ export function useOpen() {
       play({
         kind: item.kind as "movie" | "series" | "live",
         id: item.id,
-        ext: item.extension ?? undefined,
+        // live catalog entries say "ts"; the webview needs HLS, so let the
+        // backend pick the format for live channels.
+        ext: item.kind === "live" ? undefined : item.extension ?? undefined,
         title: item.name,
         poster: item.cover ?? undefined,
         historyKey: `${item.kind}:${item.id}`,

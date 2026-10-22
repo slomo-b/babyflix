@@ -93,6 +93,7 @@ const de: Record<string, string> = {
 
   // home
   "home.continue": "Weiterschauen",
+  "home.recentChannels": "Zuletzt gesehene Sender",
   "home.loadError": "Inhalte konnten nicht geladen werden:",
 
   // row
@@ -355,6 +356,7 @@ const en: Record<string, string> = {
     "Your credentials stay local on this device. BabyFlix provides no content – you use your own authorized access.",
 
   "home.continue": "Continue watching",
+  "home.recentChannels": "Recently watched channels",
   "home.loadError": "Could not load content:",
 
   "row.seeAll": "See all",

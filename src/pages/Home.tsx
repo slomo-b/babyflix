@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Play, X } from "lucide-react";
 import { api, imgUrl, MediaItem } from "../lib/api";
 import { Hero } from "../components/Hero";
 import { Row } from "../components/Row";
+import { ChannelCard } from "../components/MediaCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { useOpen } from "../lib/useOpen";
 import { useStore, HistoryItem, seriesIdsByTitle, historyGroupKey } from "../lib/store";
@@ -83,10 +84,36 @@ export default function Home() {
     const seen = new Set<string>();
     const out: HistoryItem[] = [];
     for (const h of history) {
+      // Sender gehoeren nicht in "Weiterschauen" - sie bekommen eine eigene Reihe.
+      if (h.kind === "live") continue;
       const gruppe = historyGroupKey(h, ids);
       if (seen.has(gruppe)) continue;
       seen.add(gruppe);
       out.push(h);
+      if (out.length >= 12) break;
+    }
+    return out;
+  }, [history]);
+
+  /** Zuletzt gesehene Sender, aus dem lokalen Verlauf. */
+  const recentLive = useMemo(() => {
+    const seen = new Set<string>();
+    const out: MediaItem[] = [];
+    for (const h of history) {
+      if (h.kind !== "live" || seen.has(h.id)) continue;
+      seen.add(h.id);
+      out.push({
+        id: h.id,
+        kind: "live",
+        name: h.title,
+        cover: h.poster ?? null,
+        category_id: null,
+        extension: null,
+        added: null,
+        rating: null,
+        epg_channel_id: null,
+        tv_archive: false,
+      });
       if (out.length >= 12) break;
     }
     return out;
@@ -147,7 +174,7 @@ export default function Home() {
                   play({
                     kind: h.kind,
                     id: h.id,
-                    ext: h.ext,
+                    ext: h.kind === "live" ? undefined : h.ext,
                     title: h.title,
                     poster: h.poster,
                     subtitle: h.subtitle,
@@ -169,8 +196,33 @@ export default function Home() {
         const title =
           row.title ?? (row.category_id ? catName.get(row.category_id) ?? t("movies.title") : t("movies.title"));
         return (
-          <Row
-            key={`${row.kind}-${row.category_id ?? row.title ?? i}`}
+          <Fragment key={`${row.kind}-${row.category_id ?? row.title ?? i}`}>
+            {/* Zuletzt gesehene Sender direkt ueber der Live-TV-Reihe */}
+            {row.kind === "live" && recentLive.length > 0 && (
+              <section className="mb-9">
+                <h2 className="mb-4 text-lg font-bold tracking-tight">
+                  {t("home.recentChannels")}
+                </h2>
+                <div className="scroll-x no-scrollbar">
+                  {recentLive.map((item) => (
+                    <ChannelCard
+                      key={item.id}
+                      item={item}
+                      onClick={() =>
+                        play({
+                          kind: "live",
+                          id: item.id,
+                          title: item.name,
+                          poster: item.cover ?? undefined,
+                          historyKey: `live:${item.id}`,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            <Row
             title={title}
             kind={row.kind}
             items={row.items as MediaItem[]}
@@ -189,7 +241,8 @@ export default function Home() {
                         : "/movies"
                     )
             }
-          />
+            />
+          </Fragment>
         );
       })}
     </div>

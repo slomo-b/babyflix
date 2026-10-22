@@ -747,9 +747,16 @@ async fn play_url(
             .await
             .unwrap_or(raw))
     } else {
-        let ext = ext
-            .filter(|e| !e.is_empty())
-            .unwrap_or_else(|| xtream::preferred_ext(s, kind, None));
+        // Live catalog entries carry `extension: "ts"`, but the webview can only
+        // play HLS. Honouring that "ts" handed raw MPEG-TS to hls.js, which cannot
+        // parse it - and the open TS stream also blocked the panel's single
+        // connection. For live, always ask the panel for its preferred format.
+        let ext = if kind == "live" {
+            xtream::preferred_ext(s, "live", None)
+        } else {
+            ext.filter(|e| !e.is_empty())
+                .unwrap_or_else(|| xtream::preferred_ext(s, kind, None))
+        };
         Ok(xtream::stream_url(s, kind, id, &ext))
     }
 }
