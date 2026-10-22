@@ -258,6 +258,14 @@ async fn categories(State(app): State<Arc<App>>, Query(q): Query<KindQ>) -> ApiR
     if q.hide_adult.unwrap_or(true) {
         cats.retain(|c| !adult::is_adult_category(&c.name));
     }
+    // Live categories that only held the provider's event placeholders would show
+    // up empty in the sidebar after those are dropped from the catalogue.
+    if xtream::norm_kind(&q.kind) == "live" {
+        if let Ok(items) = app.ensure_catalog("live", false).await {
+            let used: HashSet<&str> = items.iter().filter_map(|i| i.category_id.as_deref()).collect();
+            cats.retain(|c| used.contains(c.id.as_str()));
+        }
+    }
     Ok(Json(json!({ "categories": cats })))
 }
 

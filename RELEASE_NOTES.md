@@ -4,6 +4,16 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.15
+
+- 🎬 **Series no longer show the end card mid-episode.** If the provider's length information is too
+  short, the player used to think the episode was over while it was still running — now the card only
+  appears when really nothing is coming any more.
+- 🔁 **Stalls heal themselves.** If the preparation of a film or episode breaks off, playback
+  continues from the current spot instead of dropping into the error screen.
+- 🧹 **6,856 dead "NO EVENT STREAMING" entries are gone** from the live list and the search. They are
+  placeholders without a stream behind them.
+
 ## 🆕 What's new in 1.5.14
 
 - 🔊 **Live channels with Dolby sound now play.** SRF 1 HD and other stations with AC-3/E-AC-3 audio

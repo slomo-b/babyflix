@@ -332,6 +332,7 @@ export function Player() {
       hls.on(Hls.Events.LEVEL_SWITCHED, () => setLevelIndex(hls.autoLevelEnabled ? -1 : hls.currentLevel));
       let networkRetries = 0;
       let mediaRetries = 0;
+      let stallRestarts = 0;
       hls.on(Hls.Events.ERROR, (_e, data) => {
         // hls.js cannot demux AC-3/E-AC-3 audio from MPEG-TS ("Unsupported EC-3 in
         // M2TS"). Those failures are *not* fatal and repeat for every fragment, so
@@ -358,9 +359,23 @@ export function Player() {
           hls.startLoad(video.currentTime > 1 ? video.currentTime : -1);
           return;
         }
-        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3) {
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3 && !(isVod && remuxRef.current)) {
           hls.recoverMediaError();
           return;
+        }
+        // A remux session can stop early (a broken packet in the file, a session
+        // that was cleaned up after a long pause). Instead of dropping the viewer
+        // into the error overlay mid-episode, continue with a fresh remux from the
+        // current position.
+        if (isVod && remuxRef.current && stallRestarts < 2) {
+          const at = offsetRef.current + video.currentTime;
+          if (at > 20) {
+            stallRestarts++;
+            desiredOffset.current = { key: streamKey, at };
+            setLoading(true);
+            setSeekNonce((n) => n + 1);
+            return;
+          }
         }
         setErrorMsg(String(data.details || data.type || "fatal playback error"));
         onFatal();
@@ -536,6 +551,7 @@ export function Player() {
         persist(abs, dur);
       }
       // Gepufferter Bereich (heller Balken hinter dem Fortschritt).
+      let bufEnd = 0;
       try {
         const b = video.buffered;
         let end = 0;
@@ -546,19 +562,24 @@ export function Player() {
           }
         }
         if (!end && b.length) end = b.end(b.length - 1);
+        bufEnd = end;
         setBufferedPct(dur > 0 ? Math.min(100, ((offsetRef.current + end) / dur) * 100) : 0);
       } catch {
         /* buffered wirft, solange nichts geladen ist */
       }
       // Wächter: FFmpeg-Remux-Streams (HLS „event") melden am Ende nicht immer
-      // ein „ended". Stockt die Wiedergabe am Ende, kommt die Endkarte trotzdem.
+      // ein „ended". Die Endkarte darf aber nur kommen, wenn wirklich nichts mehr
+      // nachkommt: steht der Player nur hinter einer zu kurz geprobten Länge,
+      // läuft die Folge weiter - dann wäre die Karte mitten in der Handlung.
       if (current.kind !== "live" && !endShownRef.current) {
-        if (durRef.current > 0 && !video.paused && abs >= durRef.current - 1.5) {
+        const atBufferEnd = bufEnd > 0 && video.currentTime >= bufEnd - 1;
+        const plausibleEnd = durRef.current > 0 && abs >= durRef.current - 2;
+        if (plausibleEnd && atBufferEnd && !video.paused) {
           if (endTimer === null) {
             endTimer = window.setTimeout(() => {
               endTimer = null;
               if (!cancelled) onEnded();
-            }, 2000);
+            }, 2500);
           }
         } else if (endTimer !== null) {
           window.clearTimeout(endTimer);

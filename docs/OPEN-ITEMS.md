@@ -62,3 +62,40 @@ IMDb id → rating, title → id needs a network lookup).
 - Workstreams W4 (subtitles) and W5 (live raw TS) shipped in several releases
   without ever seeing a real stream.
 - The local branch `feat/ui-improvements` still exists and matches `main`.
+
+## Live TV: the real codec failure (measured 2026-10-22/23)
+
+Everything up to 1.5.13 was about *how* the stream was requested. The actual reason
+some channels never played is the **audio codec**:
+
+| channel | video | audio | result in a real WKWebView |
+|---|---|---|---|
+| Hajduk TV (`1880539`) | H.264 High | AAC LC | 90 s clean, no errors |
+| SRF 1 HD (`188226`) | H.264 Main | **E-AC-3** | never reaches `t > 0` |
+
+hls.js cannot demux AC-3/E-AC-3 out of MPEG-TS and says so:
+
+```
+mediaError/fragParsingError  fatal=false  reason=Unsupported EC-3 in M2TS found
+```
+
+The error is **not fatal**, so before 1.5.14 the player kept loading forever instead
+of taking another path. Such channels now go to FFmpeg (video copy, audio → AAC),
+and the live remux never copies AC-3/E-AC-3 itself, because its playlist is read by
+hls.js again.
+
+The "stops and jumps a few seconds back" symptom had two separate causes, both
+retry paths: `recoverMediaError()` (flushes the buffer, restarts at the fragment
+start) and `startLoad()` without a position (falls back to the live sync point).
+
+### Catalogue survey (sampled, not all 52,782)
+
+Live entries were probed through the app's own `/api/player` (ffprobe with
+`-extension_picky false`, because the proxy URLs have no file extension). Results so
+far: the overwhelming majority is **H.264 + AAC** and plays. Failures are almost all
+the provider's `NO EVENT STREAMING` event placeholders (**6,856** entries, 13 % of
+the catalogue) plus dead upstream channels — neither is fixable client-side.
+`NO EVENT STREAMING` entries are now dropped from the catalogue.
+
+Duplicate names (1,587) are not a systematic problem and were not exploited for
+fallbacks.

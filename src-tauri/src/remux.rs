@@ -620,6 +620,13 @@ impl Remux {
         } else {
             info.as_ref().and_then(duration_of)
         };
+        // A stored position at or beyond the end (wrong metadata from the panel, a
+        // different cut of the episode) would make FFmpeg output nothing: the
+        // player stalls immediately and the episode looks finished. Start over.
+        let offset = match duration {
+            Some(d) if offset > 0.0 && offset >= d - 2.0 => 0.0,
+            _ => offset,
+        };
         let vcodec = stream_codec(&streams["video"], 0).unwrap_or_else(|| "h264".into());
         let acodec = stream_codec(&streams["audio"], audio.unwrap_or(0));
 

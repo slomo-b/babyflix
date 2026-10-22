@@ -246,6 +246,7 @@ impl App {
             .await
             .ok_or_else(|| anyhow!("not logged in"))?;
         let items = xtream::list(&self.client, &session, key).await?;
+        let items: Vec<MediaItem> = items.into_iter().filter(|i| !xtream::is_placeholder(i)).collect();
         let items = Arc::new(items);
         self.save_disk_catalog(key, &items);
         let mut cat = self.catalog.write().await;
@@ -260,6 +261,8 @@ impl App {
         let path = self.catalog_path(kind);
         let text = std::fs::read_to_string(&path).ok()?;
         let items: Vec<MediaItem> = serde_json::from_str(&text).ok()?;
+        // Cached catalogues still contain the provider's event placeholders.
+        let items: Vec<MediaItem> = items.into_iter().filter(|i| !xtream::is_placeholder(i)).collect();
         if items.is_empty() {
             return None;
         }

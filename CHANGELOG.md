@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.15] — 2026-10-23
+
+### Fixed
+- **Series occasionally stalled and then showed the end card** ("watch from the start / skip /
+  close"). The end-of-episode guard compared the playback position with the duration ffprobe
+  reported for the file. When that length is too short (common with these panels), the card appeared
+  in the middle of an episode that was still playing. The guard now additionally requires that the
+  buffer is exhausted — i.e. nothing is coming any more — and waits 2.5 s without progress.
+- **A broken remux session ended in the error overlay mid-episode.** The player now continues with a
+  fresh remux from the current position (at most twice) instead of aborting. For remux streams a
+  fatal media error takes that path directly, so there is no buffer flush with a jump back either.
+- **A stored position beyond the end restarted an episode as "finished".** The panel's metadata
+  sometimes claims a shorter length than the file; a resume position at/after that point made FFmpeg
+  produce an empty stream — the player stalled instantly. Such positions start over at 0 now.
+
+### Changed
+- **6,856 live entries named "NO EVENT STREAMING" no longer appear.** They are event placeholders
+  the provider keeps in the catalogue without any stream behind them (13 % of all live entries, every
+  sampled one fails with `badformat`). Live categories that only held such entries disappear with
+  them.
+
 ## [1.5.14] — 2026-10-22
 
 ### Fixed

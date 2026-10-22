@@ -60,6 +60,16 @@ pub struct Category {
 }
 
 /// Normalize a catalog kind to the internal set: `vod` | `series` | `live`.
+/// Channels the provider keeps in the catalogue only as event placeholders.
+///
+/// They carry no stream at all (the panel answers with garbage - measured as
+/// "badformat" on every sample) and there are ~6,900 of them, about 13 % of all
+/// live entries. They only clutter the live list, the search and the category
+/// counts, so they are dropped when the catalogue is built.
+pub fn is_placeholder(item: &MediaItem) -> bool {
+    item.kind == "live" && item.name.to_ascii_uppercase().contains("NO EVENT STREAMING")
+}
+
 pub fn norm_kind(kind: &str) -> &'static str {
     match kind {
         "series" | "shows" | "tv" => "series",
