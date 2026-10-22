@@ -24,12 +24,30 @@ What exists and stays in the code:
 If the topic comes back, the missing piece is still the same: an OpenSubtitles API key
 plus a manual offset control in the player (±10 s).
 
-## Live TV hardening (partly done)
+## Live TV
 
-Three causes of sporadically hanging live playback were fixed in 1.5.9 (probe
-timeout, proxy masking error statuses, 30 s wait on a dead converter). If it still
-fails, the next question is: **single channels or all of them?** That separates a
-panel-side cause (connection limit, channel offline) from an app-side one.
+**Root cause of "live TV generally does not work" found on 2026-10-22.** The panel
+answers a channel URL with a `302` to a CDN, and the HLS playlist contains
+root-relative segment paths (`/hls/<hash>/…`). The proxy resolved them against the
+**originally requested** URL (the panel host) instead of the redirect target, so
+every segment request got a `403`. Fixed by using the response's effective URL as
+the base, plus a regression test.
+
+Measured against the user's panel (SRF 1 HD):
+
+| Segment requested from | Result |
+|---|---|
+| panel host | `403` · `text/html` · 0 bytes |
+| CDN host (redirect target) | `200` · `video/mp2t` · 9.6 MB |
+
+This is why VOD kept working (FFmpeg follows redirects itself and never uses the
+playlist rewriter) while live was broken for every channel.
+
+Side note: that panel allows only **one** connection (`max_connections: 1`), but
+parallel segment fetches work, so the limit is not the cause.
+
+Earlier, 1.5.9 fixed three different hang scenarios (probe timeout, proxy masking
+error statuses, 30 s wait on a dead converter). Those were real but not the cause.
 
 ## "Top rated" row is really "newest"
 

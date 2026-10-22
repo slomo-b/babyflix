@@ -107,6 +107,11 @@ pub async fn proxy(
     }
     let resp = req.send().await?;
     let status = resp.status();
+    // Redirects matter here: panels hand playlists over to a CDN, and playlists
+    // contain root-relative segment paths ("/hls/…") that only resolve against
+    // that final host. Resolving them against the requested URL produced a 403
+    // for every segment - which broke live TV completely.
+    let final_url = resp.url().to_string();
     let headers = resp.headers().clone();
     let ct = headers
         .get(header::CONTENT_TYPE)
@@ -118,7 +123,7 @@ pub async fn proxy(
     // parses the error body as a playlist and reports a meaningless parse error.
     if status.is_success() && is_m3u8(url, ct.as_deref()) {
         let text = resp.text().await?;
-        let rewritten = rewrite_m3u8(origin, url, &text);
+        let rewritten = rewrite_m3u8(origin, &final_url, &text);
         return Ok(Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
@@ -154,8 +159,7 @@ pub async fn proxy(
     Ok(builder.body(Body::from_stream(stream))?)
 }
 
-pub async fn proxy_image(client: &reqwest::Client, url: &str, ua: Option<&str>) -> Result<Response> {
-    let resp = client
+pub async fn proxy_image(client: &reqwest::Client, url: &str, ua: Option<&str>) -> Result<Response> {    let resp = client
         .get(url)
         .header("User-Agent", ua.unwrap_or(UA))
         .header("Accept", "image/*,*/*")
@@ -175,4 +179,27 @@ pub async fn proxy_image(client: &reqwest::Client, url: &str, ua: Option<&str>) 
         .header(header::CACHE_CONTROL, "public, max-age=86400")
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(Body::from(bytes))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_m3u8;
+
+    /// Panel playlists contain root-relative segment paths ("/hls/…"). They must
+    /// resolve against the playlist's **final** URL - i.e. the CDN the panel
+    /// redirected to - not against the URL that was requested. Using the latter
+    /// sent every segment request to the panel host, which answered 403 and made
+    /// live TV fail completely.
+    #[test]
+    fn relative_uris_resolve_against_the_playlist_base() {
+        let out = rewrite_m3u8(
+            "http://localhost:9",
+            "http://cdn.example/live/a/b.m3u8",
+            "#EXTM3U\n#EXTINF:10,\n/hls/x/1.ts\nseg2.ts\n",
+        );
+        // Both segment lines are proxied and both carry the playlist's host.
+        assert_eq!(out.matches("cdn").count(), 2, "{out}");
+        assert_eq!(out.matches("u=http").count(), 2, "{out}");
+        assert!(out.starts_with("#EXTM3U"), "{out}");
+    }
 }
