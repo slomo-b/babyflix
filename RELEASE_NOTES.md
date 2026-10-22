@@ -4,6 +4,17 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.10
+
+- ❤️ **"Likes" sits right under Home.** Your watchlist moved up in the sidebar and has a clearer
+  name — "Likes" in the navigation, on the page, and on the two detail buttons ("Like" / "Liked").
+- 🎲 **Random episode wherever the next one is offered.** Besides the end card, the "Up next" banner
+  during the last 20 seconds now has the button too.
+- 🔗 **Playback keeps chaining.** After "Play now", the next episode had no up-next banner and no
+  autoplay, and the end card even claimed the series had ended. The player now resolves the next
+  episode itself.
+- 🔤 **Subtitles: German first, then English**, labelled with the language name.
+
 ## 🆕 What's new in 1.5.9
 
 - 🎲 **"Random episode" on the end card.** At the end of an episode you can now pick a random other

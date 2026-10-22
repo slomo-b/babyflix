@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.10] — 2026-10-22
+
+### Added
+- **"Likes" directly under Home.** The watchlist moved up in the sidebar and is called "Likes" now —
+  in the navigation, on the page, in its empty state and on the two detail buttons
+  ("Like" / "Liked"). Internal names (route `/watchlist`, store field `favorites`) stay as they
+  are; renaming them would touch routing and persisted data for no user-visible gain.
+- **The "random episode" option is available wherever the next episode is offered.** It used to
+  exist only on the end card; the "Up next" banner shown during the last 20 seconds has it too.
+
+### Fixed
+- **The next-episode chain no longer stops after "Play now".** That jump carried neither the series
+  id nor the following episode, so the next episode had no up-next banner and no autoplay — and the
+  end card claimed the series had ended. The player now resolves the next episode from the series
+  when the request does not contain it, and passes the series id along.
+- **Subtitle tracks are ordered German, then English**, following the UI language, and are labelled
+  with the language name instead of the raw code ("Deutsch" instead of "ger").
+
 ## [1.5.9] — 2026-10-22
 
 ### Added
