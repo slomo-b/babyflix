@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.13] — 2026-10-22
+
+### Fixed
+- **Live channels started from the home page or from search played no video.** Live catalog entries
+  carry `extension: "ts"`, and opening a channel from a card passed that value on — so the backend
+  resolved the channel as a `.ts` URL and handed **raw MPEG-TS** to hls.js, which cannot build a
+  playlist from it. The Live tab worked because it passes no extension, which is why the failure
+  looked intermittent.
+
+  Measured on the affected panel (Hajduk TV):
+
+  | request | response |
+  |---|---|
+  | without `ext` | `200` · `application/vnd.apple.mpegurl` · 1.2 KB (playable) |
+  | `ext=ts` | `200` · `video/mp2t` · 15 MB (hls.js fails) |
+
+  For live, the `ext` parameter is now ignored and the panel's preferred format is used (HLS); the
+  frontend no longer sends an extension for live channels either.
+
+  Side effect of the old behaviour: the open TS stream occupied the panel's single connection
+  (`max_connections: 1`) and blocked further requests — one stuck channel could take the app down
+  with it.
+
 ## [1.5.12] — 2026-10-22
 
 ### Added

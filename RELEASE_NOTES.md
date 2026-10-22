@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.13
+
+- 📺 **Live channels now start from everywhere.** Opening a channel from the home page or from search
+  handed the backend the catalog's `ts` extension, so it requested **raw MPEG-TS** — which the player
+  cannot read. Channels opened from the Live tab worked, because that path sends no extension; that
+  is why the failure looked random. For live, the format is now always chosen by the backend (HLS).
+  A stuck raw-TS stream also occupied the panel's single connection; that is gone too.
+
 ## 🆕 What's new in 1.5.12
 
 - 🌍 **Pick the language of the recommendations.** Panels list the same title several times with a
