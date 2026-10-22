@@ -140,6 +140,10 @@ export default function Home() {
                     poster: h.poster,
                     subtitle: h.subtitle,
                     historyKey: h.key,
+                    // Ohne die Serien-ID kennt der Player die Serie nicht mehr:
+                    // kein "Als Nächstes", keine Zufallsfolge, und am Ende
+                    // behauptet die Endkarte "Ende der Serie".
+                    seriesId: h.seriesId,
                   })
                 }
                 onRemove={() => removeHistoryGroup(h)}

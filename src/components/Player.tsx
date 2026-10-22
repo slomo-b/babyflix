@@ -181,6 +181,15 @@ export function Player() {
    */
   const [resolvedNext, setResolvedNext] = useState<PlayNext | null>(null);
   const nextEp = current?.next ?? resolvedNext;
+  /**
+   * Serien-ID, auch wenn der Auftrag keine mitbringt. Ältere Verlaufseinträge
+   * (oder „Weiterschauen") haben keine - dann wird die Serie über den exakten
+   * Titel im Katalog gesucht, damit „Als Nächstes" und die Zufallsfolge
+   * trotzdem funktionieren.
+   */
+  const [inferredSeriesId, setInferredSeriesId] = useState<string | null>(null);
+  const seriesId =
+    current?.kind === "series" ? (current.seriesId ?? inferredSeriesId ?? null) : null;
   const [endIn, setEndIn] = useState(0);
   const endTickRef = useRef<number | null>(null);
   const endInRef = useRef(0);
@@ -585,11 +594,11 @@ export function Player() {
   useEffect(() => {
     const c = current;
     setResolvedNext(null);
-    if (!c || c.kind !== "series" || c.next || !c.seriesId) return;
+    if (!c || c.kind !== "series" || c.next || !seriesId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const d = await api.detail("series", c.seriesId as string);
+        const d = await api.detail("series", seriesId as string);
         const all = (d.seasons ?? []).flatMap((s) =>
           (s.episodes ?? []).map((e) => ({ ...e, season: s.number }))
         );
@@ -611,7 +620,33 @@ export function Player() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, current?.seriesId, current?.next]);
+  }, [current?.id, current?.next, seriesId]);
+
+  /**
+   * Fehlt die Serien-ID im Auftrag (ältere Verlaufseinträge, „Weiterschauen"),
+   * wird die Serie über den exakten Titel im Katalog gesucht. Ohne sie gäbe es
+   * weder „Als Nächstes" noch die Zufallsfolge - und die Endkarte behauptete
+   * fälschlich das Serienende.
+   */
+  useEffect(() => {
+    const c = current;
+    setInferredSeriesId(null);
+    if (!c || c.kind !== "series" || c.seriesId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await api.browse({ kind: "series", q: c.title, sort: "name", page_size: 30 });
+        const hit = r.items.find((i) => i.name === c.title);
+        if (!cancelled && hit) setInferredSeriesId(hit.id);
+      } catch {
+        /* ohne Treffer bleibt es ohne Serien-ID */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, current?.title, current?.seriesId, current?.kind]);
 
   const persist = useCallback(
     (pos: number, dur: number) => {
@@ -621,7 +656,7 @@ export function Player() {
         kind: current.kind,
         id: current.id,
         ext: current.ext,
-        seriesId: current.seriesId,
+        seriesId: seriesId ?? undefined,
         title: current.title,
         poster: current.poster,
         subtitle: current.subtitle,
@@ -662,7 +697,7 @@ export function Player() {
       // Automatik verloren.
       seriesId: current.seriesId,
     });
-  }, [current, nextEp, play]);
+  }, [current, nextEp, seriesId, play]);
 
   const toggle = useCallback(() => {
     const v = videoRef.current;
@@ -700,10 +735,10 @@ export function Player() {
    */
   const playRandom = useCallback(async () => {
     const c = current;
-    if (!c || c.kind !== "series" || !c.seriesId || randomBusy) return;
+    if (!c || c.kind !== "series" || !seriesId || randomBusy) return;
     setRandomBusy(true);
     try {
-      const d = await api.detail("series", c.seriesId);
+      const d = await api.detail("series", seriesId);
       const all = (d.seasons ?? []).flatMap((s) =>
         (s.episodes ?? []).map((e) => ({ ...e, season: s.number }))
       );
@@ -721,7 +756,7 @@ export function Player() {
         poster: ep.cover ?? c.poster,
         subtitle: `S${ep.season} · E${ep.num} – ${ep.title}`,
         historyKey: `series:${ep.id}`,
-        seriesId: c.seriesId,
+        seriesId,
         next: next
           ? {
               kind: "series",
@@ -737,7 +772,7 @@ export function Player() {
     } finally {
       setRandomBusy(false);
     }
-  }, [current, play, cancelEnd, randomBusy]);
+  }, [current, play, cancelEnd, randomBusy, seriesId]);
 
   /** Countdown am Ende: zählt runter und startet dann die nächste Folge. */
   const startCountdown = useCallback(() => {
@@ -1299,7 +1334,7 @@ export function Player() {
             <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={goNextNow}>
               <Play size={14} fill="currentColor" /> {t("player.playNext")}
             </button>
-            {current.kind === "series" && current.seriesId && (
+            {current.kind === "series" && seriesId && (
               <button
                 className="btn btn-ghost px-3 py-1.5 text-xs"
                 onClick={() => void playRandom()}
@@ -1397,7 +1432,7 @@ export function Player() {
                   <RotateCcw size={16} /> {t("player.replay")}
                 </button>
               )}
-              {current.kind === "series" && current.seriesId && (
+              {current.kind === "series" && seriesId && (
                 <button
                   className="btn btn-ghost px-3 py-2 text-sm"
                   onClick={() => void playRandom()}
