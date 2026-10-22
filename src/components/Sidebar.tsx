@@ -4,11 +4,11 @@ import { useT } from "../lib/i18n";
 
 const nav = [
   { to: "/", key: "nav.home", icon: Home },
+  { to: "/watchlist", key: "nav.watchlist", icon: Heart },
   { to: "/movies", key: "nav.movies", icon: Film },
   { to: "/series", key: "nav.series", icon: Tv },
   { to: "/live", key: "nav.live", icon: Radio },
   { to: "/search", key: "nav.search", icon: Search },
-  { to: "/watchlist", key: "nav.watchlist", icon: Heart },
   { to: "/settings", key: "nav.settings", icon: Settings },
 ];
 
