@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.16] — 2026-10-23
+
+### Fixed
+- **Selecting a language above the recommendations still showed films of other languages.** The
+  banner drew its candidates from the 30 best-rated films and filtered them by language *afterwards*.
+  Measured on the real catalogue: **0 of those 30 were German**, so picking "DE" always fell back to
+  the mixed list — which is why an English title appeared next to the DE selector. The language now
+  filters the whole catalogue first (14,235 German titles), then the best-rated 120 of that language
+  form the rotation.
+
+  Note on what this list is: it ranks by the rating the **provider** reports, not by the IMDb chart.
+  Those values are often the release year (or a flat 10.0), so the result is "the newest well-known
+  titles of that language". A real IMDb ranking needs the title → IMDb id resolution for thousands of
+  titles (network, one-time per title) — see `docs/OPEN-ITEMS.md`.
+
 ## [1.5.15] — 2026-10-23
 
 ### Fixed

@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.16
+
+- 🇩🇪 **The language choice above the recommendations now really applies.** Until now the banner
+  looked at the 30 best-rated films first and filtered by language afterwards — none of those 30 was
+  German, so "DE" fell back to the mixed list and you saw English titles. The filter now runs over
+  the whole catalogue (14,235 German films) before the selection.
+
 ## 🆕 What's new in 1.5.15
 
 - 🎬 **Series no longer show the end card mid-episode.** If the provider's length information is too

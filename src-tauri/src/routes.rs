@@ -52,6 +52,40 @@ fn cmp_rating(a: &MediaItem, b: &MediaItem) -> Ordering {
         .unwrap_or(Ordering::Equal)
 }
 
+/// Films the banner may pick from, for one language (or all of them).
+///
+/// Three passes, from strict to forgiving: language plus a usable rating, language
+/// only, then the whole catalogue. The rating is whatever the panel reports - often
+/// the release year - so it only filters out entries without any rating.
+///
+/// The result is sorted best-first and truncated to a pool big enough for variety.
+/// The language filter must run *before* that cut: truncating first made a language
+/// without an entry in the first N films fall back to the mixed list.
+fn hero_candidates<'a>(
+    vod: &'a [MediaItem],
+    lang: Option<&str>,
+    adult: &HashSet<String>,
+) -> Vec<&'a MediaItem> {
+    let eligible = |i: &&MediaItem| i.cover.is_some() && !in_categories(i, adult);
+    let lang_ok = |i: &&MediaItem| match lang {
+        Some(l) => name_lang(&i.name).as_deref() == Some(l),
+        None => true,
+    };
+    let mut pool: Vec<&MediaItem> = vod
+        .iter()
+        .filter(|i| eligible(i) && lang_ok(i) && i.rating.unwrap_or(0.0) >= 7.0)
+        .collect();
+    if pool.is_empty() {
+        pool = vod.iter().filter(|i| eligible(i) && lang_ok(i)).collect();
+    }
+    if pool.is_empty() {
+        pool = vod.iter().filter(|i| eligible(i)).collect();
+    }
+    pool.sort_by(|a, b| cmp_rating(a, b));
+    pool.truncate(120);
+    pool
+}
+
 /// Language prefix some panels put in front of a title ("DE - …", "AT| …",
 /// "US (Paramount 062) | …"). Only two uppercase letters followed by a separator
 /// count, so ordinary titles are not mistaken for a language.
@@ -381,18 +415,12 @@ async fn home(State(app): State<Arc<App>>, Query(q): Query<HomeQ>) -> ApiResult 
         .as_deref()
         .map(str::trim)
         .filter(|l| !l.is_empty());
-    let mut pool: Vec<&MediaItem> = match want_lang {
-        Some(lang) => top
-            .iter()
-            .copied()
-            .filter(|i| name_lang(&i.name).as_deref() == Some(lang))
-            .collect(),
-        None => top.clone(),
-    };
-    if pool.is_empty() {
-        // Nothing of that language in the row - never leave the banner empty.
-        pool = top.clone();
-    }
+    // The banner shows a *different* handful of the best-rated films on every load
+    // instead of always the same six. The language filter has to be applied to the
+    // whole catalogue *before* any truncation: cutting to the 30 newest first and
+    // filtering afterwards made a language with no entry in those 30 fall back to
+    // the mixed list - selecting "DE" still showed an English film.
+    let mut pool = hero_candidates(&vod, want_lang, &vod_adult);
     shuffle(&mut pool, seed_from_clock());
     let hero: Vec<&MediaItem> = pool.into_iter().take(6).collect();
 
@@ -1051,7 +1079,48 @@ pub fn router(app: Arc<App>) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use super::{name_lang, shuffle};
+    use super::{hero_candidates, name_lang, shuffle};
+    use crate::xtream::MediaItem;
+    use std::collections::HashSet;
+
+    fn item(name: &str, rating: Option<f64>) -> MediaItem {
+        MediaItem {
+            id: name.to_string(),
+            kind: "movie".into(),
+            name: name.to_string(),
+            cover: Some("cover.jpg".into()),
+            category_id: None,
+            extension: Some("mp4".into()),
+            added: None,
+            rating,
+            epg_channel_id: None,
+            tv_archive: false,
+            url: None,
+        }
+    }
+
+    /// Selecting a language must really deliver that language - even when it is a
+    /// small part of the catalogue. The bug: the pool was cut to the 30 newest
+    /// films *before* filtering by language, so "DE" showed English films whenever
+    /// no German film happened to be among those 30.
+    #[test]
+    fn the_banner_follows_the_selected_language() {
+        let mut vod: Vec<MediaItem> = (0..60)
+            .map(|n| item(&format!("EN - English Film {n}"), Some(2026.0)))
+            .collect();
+        vod.push(item("DE - Ein deutscher Film", Some(2021.0)));
+        vod.push(item("DE - Noch einer", Some(2018.0)));
+
+        let pool = hero_candidates(&vod, Some("DE"), &HashSet::new());
+        assert_eq!(pool.len(), 2, "only the German films belong in the pool");
+        assert!(pool.iter().all(|i| i.name.starts_with("DE - ")));
+
+        // Without a language the banner stays mixed.
+        assert_eq!(hero_candidates(&vod, None, &HashSet::new()).len(), 62);
+
+        // A language that does not exist must not leave the banner empty.
+        assert!(!hero_candidates(&vod, Some("XX"), &HashSet::new()).is_empty());
+    }
 
     /// The banner picks a random subset, so the shuffle must be a real
     /// permutation - never lose or duplicate an entry.
