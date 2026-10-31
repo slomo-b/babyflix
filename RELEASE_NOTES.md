@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.18
+
+- 🔧 **Hotfix: 1.5.17 could not play anything.** A new player option was rejected by hls.js, so every
+  film and channel ended in "Stream konnte nicht geladen werden". Fixed — and a rejected option can
+  no longer stop playback at all, the player then just uses its defaults. The jump fix from 1.5.17
+  stays.
+
 ## 🆕 What's new in 1.5.17
 
 - ⏩ **No more 30–40 minute jumps while watching.** The film preparation writes the stream far faster

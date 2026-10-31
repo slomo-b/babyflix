@@ -297,7 +297,7 @@ export function Player() {
     const directUrl = playerUrl(current.kind, current.id, current.ext);
 
     const setupHls = (src: string, onFatal: () => void, prepared = false) => {
-      const hls = new Hls({
+      const hlsOptions = {
         // These panels deliver plain HLS with ~10 s segments and a 12 s target
         // duration - low-latency mode is meant for LL-HLS and only makes the
         // player chase the live edge (stalls and jumps back).
@@ -309,12 +309,25 @@ export function Player() {
         // restart. `startPosition: 0` pins it to the first segment instead.
         startPosition: prepared ? 0 : -1,
         // Never jump forward to catch up with a "live" edge - neither for a
-        // prepared film nor for a channel.
+        // prepared film nor for a channel. hls.js >= 1.7 rejects
+        // `liveMaxLatencyDurationCount` unless `liveSyncDurationCount` is set
+        // explicitly as well ("Illegal hls.js config"), so pin both.
+        liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: Infinity,
         backBufferLength: 90,
         maxBufferLength: 30,
         enableWorker: true,
-      });
+      };
+      let hls: Hls;
+      try {
+        hls = new Hls(hlsOptions);
+      } catch (e) {
+        // hls.js throws on options it rejects (it did on 1.5.17 with
+        // `liveMaxLatencyDurationCount`), which killed playback completely. A bad
+        // tuning option must never cost the viewer the film.
+        console.warn("hls.js rejected its config, using defaults", e);
+        hls = new Hls({ lowLatencyMode: false, startPosition: prepared ? 0 : -1 });
+      }
       hlsRef.current = hls;
       const refreshTracks = () => {
         setAudioTracks((hls.audioTracks || []).map((a) => ({ name: a.name || a.lang || "Audio", lang: a.lang })));

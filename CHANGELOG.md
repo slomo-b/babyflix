@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.18] — 2026-10-31
+
+### Fixed
+- **1.5.17 could not play anything.** The new hls.js option `liveMaxLatencyDurationCount` is only
+  accepted together with `liveSyncDurationCount`; without it hls.js throws
+  `Illegal hls.js config: "liveMaxLatencyDurationCount" must be greater than "liveSyncDurationCount"`
+  and the player showed "Stream konnte nicht geladen werden". Both are set now (3 segments, no
+  catching up to a live edge), which keeps the jump fix from 1.5.17.
+- **A rejected hls.js option can no longer stop playback.** The player instance is created inside a
+  guard: if hls.js rejects a tuning option, playback continues with defaults instead of the error
+  overlay.
+
 ## [1.5.17] — 2026-10-31
 
 ### Fixed
