@@ -4,6 +4,19 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.17
+
+- ⏩ **No more 30–40 minute jumps while watching.** The film preparation writes the stream far faster
+  than realtime, which made the player believe it was a live stream and jump to its end — again and
+  again (three times in the first Star Wars film). Films now start at the first second and stay
+  there.
+- 🚀 **Films start roughly twice as fast.** The file was inspected twice before playback; now once,
+  and the result is remembered. Measured on a real film: 11.8 s of inspection became ~5 s.
+- 🎬 **Films that never started now play** — files where no audio track could be identified made the
+  preparation abort instead of playing the picture.
+- 🔁 **A dropped connection no longer ends the film.** Playback continues at the same spot instead of
+  showing the end card.
+
 ## 🆕 What's new in 1.5.16
 
 - 🇩🇪 **The language choice above the recommendations now really applies.** Until now the banner

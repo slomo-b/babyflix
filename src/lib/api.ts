@@ -305,19 +305,31 @@ export const api = {
       body: JSON.stringify(items),
     }),
   refresh: () => req<{ ok: boolean }>("/api/refresh", { method: "POST" }),
-  remux: (kind: Kind, id: string, ext?: string, audio?: number, live?: boolean, seek?: number) => {
+  remux: (
+    kind: Kind,
+    id: string,
+    ext?: string,
+    audio?: number,
+    live?: boolean,
+    seek?: number,
+    lang?: string
+  ) => {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);
     if (audio != null) sp.set("audio", String(audio));
     if (live) sp.set("live", "true");
     // Restart the remux at this second - how a jump beyond the prepared range works.
     if (seek != null && seek > 1) sp.set("seek", seek.toFixed(2));
+    // Preselect an audio track by language; saves a separate probe in the UI.
+    if (lang) sp.set("lang", lang);
     return req<{
       token: string;
       playlist: string;
       duration: number | null;
       /** Source second where this HLS starts (non-zero after a jump). */
       offset: number;
+      /** Track FFmpeg got, so the menu shows the right one. */
+      audio_index: number | null;
       audio: StreamInfo[];
       video: StreamInfo[];
       subtitle: StreamInfo[];

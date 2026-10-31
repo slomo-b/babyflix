@@ -1,6 +1,6 @@
 [package]
 name = "babyflix"
-version = "1.5.16"
+version = "1.5.17"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"

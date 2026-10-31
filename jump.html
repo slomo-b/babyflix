@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><title>jump test</title>
+<body style="margin:0;background:#000;color:#0f0;font:12px ui-monospace,monospace">
+<video id="v" muted autoplay playsinline style="width:480px;height:270px;background:#111"></video>
+<pre id="log" style="white-space:pre-wrap"></pre>
+<script src="hls.min.js"></script>
+<script>
+const src = new URLSearchParams(location.search).get("src");
+const el = document.getElementById("log"), v = document.getElementById("v");
+const t0 = Date.now(); const L = m => { el.textContent += ((Date.now()-t0)/1000).toFixed(1).padStart(5)+"s  "+m+"\n"; };
+const hls = new Hls({ lowLatencyMode:false, backBufferLength:90, maxBufferLength:30, enableWorker:true });
+hls.on(Hls.Events.ERROR, (_e,d) => L("ERR "+d.type+"/"+d.details+" fatal="+d.fatal));
+hls.on(Hls.Events.MANIFEST_PARSED, () => {
+  const d = hls.levels[0] && hls.levels[0].details;
+  L("manifest live="+(d&&d.live)+" startSN="+(d&&d.startSN)+" endSN="+(d&&d.endSN)+" target="+(d&&d.targetduration));
+});
+["FRAG_CHANGED","LEVEL_UPDATED","BUFFER_FLUSHING"].forEach(n => hls.on(Hls.Events[n], (_e,d)=>{
+  if (n==="LEVEL_UPDATED" && d.details) L("LEVEL "+d.details.startSN+".."+d.details.endSN+" live="+d.details.live);
+  else if (d && d.frag) L(n+" sn="+d.frag.sn);
+}));
+["playing","pause","seeking","seeked","waiting","ended","error"].forEach(n =>
+  v.addEventListener(n, () => L("DOM "+n+" t="+v.currentTime.toFixed(1))));
+hls.attachMedia(v); hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(src));
+let last=0;
+setInterval(()=>{
+  const b=v.buffered, e=b.length?b.end(b.length-1):0;
+  L("TICK t="+v.currentTime.toFixed(1)+" d="+(v.currentTime-last).toFixed(1)+" buf="+e.toFixed(1)+" paused="+v.paused);
+  last=v.currentTime;
+},3000);
+setTimeout(()=>L("DONE"),54000);
+</script>

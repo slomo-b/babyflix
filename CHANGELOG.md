@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.5.17] — 2026-10-31
+
+### Fixed
+- **Films jumped forward by 30–40 minutes while watching.** The preparation writes the playlist
+  **11–24× faster than realtime** (measured: 16.7 minutes of film after 90 seconds), so hls.js saw a
+  growing "live" stream. For live streams hls.js starts at the live edge (`liveSyncPosition`) — tens
+  of minutes ahead — and did so again on every restart. That is why the first Star Wars film jumped
+  three times. Prepared streams are now pinned to the first segment (`startPosition: 0`), and hls.js
+  never catches up to a "live" edge.
+- **Some films never started.** When the probe found no audio stream, FFmpeg aborted with
+  `exit status 8` ("Aufbereitung abgebrochen") because `-map 0:a:0` is a hard requirement. The
+  mappings are optional now (`0:v:0?`, `0:a:N?`).
+- **A dropped upstream connection ended the film mid-way.** FFmpeg closes the playlist with
+  `ENDLIST` in that case, which looks like a normal end: the end card appeared, or playback simply
+  stopped. Playback now continues at that position with a fresh remux (at most twice).
+
+### Changed
+- **Films start much faster.** The same file was probed twice before playback — once for the
+  audio-track menu, once inside the remux — measured at **6.7 s + 5.1 s** for a real film. The
+  backend now picks the audio track (German by default, with a title fallback) in the probe it needs
+  anyway, and probe results are cached for five minutes.
+
 ## [1.5.16] — 2026-10-23
 
 ### Fixed

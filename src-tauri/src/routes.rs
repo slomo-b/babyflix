@@ -876,6 +876,10 @@ struct RemuxQ {
     /// Restart the remux at this source second (seek beyond the prepared range).
     #[serde(default)]
     seek: Option<f64>,
+    /// Preferred audio language ("de"). Used when `audio` is not given, so the UI
+    /// does not need its own probe just to preselect a track.
+    #[serde(default)]
+    lang: Option<String>,
 }
 
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
@@ -907,20 +911,28 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
     let seek = q.seek.filter(|s| *s > 1.0);
     // The seek offset is part of the key: a jump to a new position is a new
     // session, while a repeat of the same position reuses it.
+    // "Automatic" is part of the key: a session started with the German track must
+    // not be reused for a request that asks for another track by index.
+    let audio_key = q
+        .audio
+        .map(|a| a.to_string())
+        .unwrap_or_else(|| format!("auto{}", q.lang.clone().unwrap_or_default()));
     let key = format!(
         "{}:{}:{}:{}:{}",
         q.kind,
         q.id,
         ext,
-        q.audio.unwrap_or(0),
+        audio_key,
         seek.map(|s| s as u64).unwrap_or(0)
     );
     let audio = q.audio;
+    let lang = q.lang.clone();
     let live = q.live.unwrap_or(false);
     let app2 = app.clone();
-    let res =
-        tokio::task::spawn_blocking(move || app2.remux.start(&key, &url, audio, &caps, live, seek))
-            .await
+    let res = tokio::task::spawn_blocking(move || {
+        app2.remux.start(&key, &url, audio, lang.as_deref(), &caps, live, seek)
+    })
+    .await
             .map_err(|e| ApiError(e.to_string()))?
             .map_err(ApiError::from)?;
     Ok(Json(json!({
@@ -928,6 +940,7 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         "playlist": format!("/api/hls/{}/index.m3u8", res.token),
         "duration": res.duration,
         "offset": res.offset,
+        "audio_index": res.audio_index,
         "audio": res.streams.get("audio").cloned().unwrap_or(Value::Null),
         "video": res.streams.get("video").cloned().unwrap_or(Value::Null),
         "subtitle": res.streams.get("subtitle").cloned().unwrap_or(Value::Null),

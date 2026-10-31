@@ -32,6 +32,8 @@ struct Session {
     /// Source position this session starts at (`-ss`). Subtitle extraction uses
     /// the same offset, so the WebVTT cues stay aligned with the video.
     offset: f64,
+    /// Audio track this session was started with (index into the probed list).
+    audio: Option<usize>,
 }
 
 pub struct RemuxStart {
@@ -44,6 +46,8 @@ pub struct RemuxStart {
     /// beyond the already prepared range: the player adds it to its own
     /// timeline, so the film keeps its absolute time.
     pub offset: f64,
+    /// Audio track FFmpeg was actually given (index into `streams.audio`).
+    pub audio_index: Option<usize>,
 }
 
 pub struct Remux {
@@ -57,6 +61,12 @@ pub struct Remux {
     /// Decision of the most recently started session - surfaced as a diagnostic
     /// so a user can see why a stream was transcoded instead of copied.
     last_decision: RwLock<Option<Value>>,
+    /// Recent probe results by input URL.
+    ///
+    /// The same file used to be probed twice per start (once for the audio-track
+    /// list, once inside `start`). On a real film that was 6.7 s + 5.1 s before
+    /// anything played; a hit makes the second one free.
+    probe_cache: Mutex<HashMap<String, (Instant, Value)>>,
 }
 
 /// Only relevant on Windows: spawn child processes without a console window.
@@ -384,6 +394,54 @@ fn duration_of(v: &Value) -> Option<f64> {
         .and_then(|s| s.trim().parse::<f64>().ok())
 }
 
+/// Audio track that matches a language code, if the file names one.
+///
+/// Picking it here saves the UI a separate probe just to preselect German. FFmpeg
+/// reports ISO 639-2 codes, so "de" has to look for "ger"/"deu" as well.
+fn pick_audio(streams: &Value, lang: &str) -> Option<usize> {
+    let want: String = lang.trim().to_lowercase().chars().take(2).collect();
+    if want.len() < 2 {
+        return None;
+    }
+    let aliases: &[&str] = match want.as_str() {
+        "de" => &["de", "ger", "deu"],
+        "en" => &["en", "eng"],
+        "fr" => &["fr", "fre", "fra"],
+        "es" => &["es", "spa"],
+        "it" => &["it", "ita"],
+        _ => &[],
+    };
+    let matches = |l: &str| {
+        let l = l.to_lowercase();
+        if aliases.iter().any(|a| l.starts_with(a)) {
+            return true;
+        }
+        aliases.is_empty() && l.starts_with(&want)
+    };
+    let audio = streams["audio"].as_array()?;
+    if let Some(i) = audio.iter().position(|a| a["lang"].as_str().map(matches).unwrap_or(false)) {
+        return Some(i);
+    }
+    // Many files carry no language tag at all, only a title like "German DTS".
+    let needles: &[&str] = match want.as_str() {
+        "de" => &["german", "deutsch"],
+        "en" => &["english", "englisch"],
+        _ => &[],
+    };
+    if needles.is_empty() {
+        return None;
+    }
+    audio.iter().position(|a| {
+        a["title"]
+            .as_str()
+            .map(|t| {
+                let t = t.to_lowercase();
+                needles.iter().any(|n| t.contains(n))
+            })
+            .unwrap_or(false)
+    })
+}
+
 fn stream_codec(list: &Value, idx: usize) -> Option<String> {
     list.as_array()?
         .get(idx)?
@@ -417,6 +475,7 @@ impl Remux {
             sessions: Mutex::new(HashMap::new()),
             keys: Mutex::new(HashMap::new()),
             last_decision: RwLock::new(None),
+            probe_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -512,6 +571,15 @@ impl Remux {
     }
 
     fn probe_json(&self, url: &str, live: bool) -> Option<Value> {
+        // Probing costs seconds on a remote file, and the player asks twice (audio
+        // tracks, then the remux). Five minutes is long enough for a session and
+        // short enough that a replaced file is picked up again.
+        let cache_key = format!("{live}|{url}");
+        if let Some((at, v)) = self.probe_cache.lock().unwrap().get(&cache_key) {
+            if at.elapsed() < Duration::from_secs(300) {
+                return Some(v.clone());
+            }
+        }
         let ffprobe = self.ffprobe.read().unwrap().clone()?;
         let mut cmd = Command::new(ffprobe);
         cmd.arg("-v")
@@ -532,7 +600,13 @@ impl Remux {
         if !out.status.success() {
             return None;
         }
-        serde_json::from_slice(&out.stdout).ok()
+        let parsed: Option<Value> = serde_json::from_slice(&out.stdout).ok();
+        if let Some(v) = &parsed {
+            let mut cache = self.probe_cache.lock().unwrap();
+            cache.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(300));
+            cache.insert(cache_key, (Instant::now(), v.clone()));
+        }
+        parsed
     }
 
     pub fn probe_streams(&self, url: &str, live: bool) -> Result<Value> {
@@ -553,6 +627,7 @@ impl Remux {
         key: &str,
         url: &str,
         audio: Option<usize>,
+        lang: Option<&str>,
         caps: &DecodeCaps,
         live: bool,
         seek: Option<f64>,
@@ -569,6 +644,7 @@ impl Remux {
                     sess.last = Instant::now();
                     let tok2 = tok.clone();
                     let offset = sess.offset;
+                    let sess_audio = sess.audio;
                     drop(s);
                     let info = self.probe_json(url, live);
                     let streams = info
@@ -584,7 +660,10 @@ impl Remux {
                         .unwrap()
                         .clone()
                         .unwrap_or(Value::Null);
-                    return Ok(RemuxStart { token: tok2, duration, streams, decision, offset });
+                    let audio_index = sess_audio;
+                    return Ok(RemuxStart {
+                        token: tok2, duration, streams, decision, offset, audio_index,
+                    });
                 }
             }
         }
@@ -628,7 +707,10 @@ impl Remux {
             _ => offset,
         };
         let vcodec = stream_codec(&streams["video"], 0).unwrap_or_else(|| "h264".into());
-        let acodec = stream_codec(&streams["audio"], audio.unwrap_or(0));
+        // No explicit choice? Take the track matching the UI language - the probe
+        // for it already happened above, so this replaces a second full probe.
+        let audio_index = audio.or_else(|| lang.and_then(|l| pick_audio(&streams, l)));
+        let acodec = audio_index.and_then(|i| stream_codec(&streams["audio"], i));
 
         // What FFmpeg will be told to do. Recorded for diagnostics: without a test
         // provider this is the only way to see whether a stream was copied or
@@ -665,12 +747,13 @@ impl Remux {
             // there, which is what makes an arbitrary jump immediate.
             cmd.arg("-ss").arg(format!("{offset:.3}"));
         }
-        cmd.arg("-i")
-            .arg(url)
-            .arg("-map")
-            .arg("0:v:0")
-            .arg("-map")
-            .arg(format!("0:a:{}", audio.unwrap_or(0)));
+        // `?` makes a mapping optional: a file whose probe found no audio (or a
+        // film without any) used to abort FFmpeg with "exit status 8" instead of
+        // playing the picture.
+        cmd.arg("-i").arg(url).arg("-map").arg("0:v:0?");
+        if let Some(i) = audio_index {
+            cmd.arg("-map").arg(format!("0:a:{i}?"));
+        }
         if video_copy {
             cmd.arg("-c:v").arg("copy");
         } else {
@@ -730,10 +813,11 @@ impl Remux {
                 live,
                 url: url.to_string(),
                 offset,
+                audio: audio_index,
             },
         );
         self.keys.lock().unwrap().insert(key.to_string(), token.clone());
-        Ok(RemuxStart { token, duration, streams, decision, offset })
+        Ok(RemuxStart { token, duration, streams, decision, offset, audio_index })
     }
 
     /// Decision of the most recently started session (`copy` vs `transcode`).
@@ -862,7 +946,7 @@ impl Remux {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_actions, DecodeCaps};
+    use super::{copy_actions, pick_audio, DecodeCaps};
     use serde_json::{json, Value};
 
     /// Before any probe: exactly the policy the app used to hard-code, so a
@@ -892,6 +976,31 @@ mod tests {
         assert_eq!(copy_actions("h264", Some("dts"), &caps), (true, false));
         // Alias: FFmpeg says h265 where the probe says hevc.
         assert_eq!(copy_actions("h265", Some("eac3"), &caps), (true, false));
+    }
+
+    /// The remux picks the audio track itself, so the UI no longer has to probe the
+    /// file a second time just to preselect German.
+    #[test]
+    fn audio_track_is_picked_by_language_with_a_title_fallback() {
+        let tagged = json!({
+            "audio": [
+                { "lang": "eng", "title": "English DTS" },
+                { "lang": "ger", "title": "Deutsch AC3" }
+            ]
+        });
+        assert_eq!(pick_audio(&tagged, "de"), Some(1));
+        assert_eq!(pick_audio(&tagged, "en"), Some(0));
+        assert_eq!(pick_audio(&tagged, "fr"), None);
+
+        // No language tags at all - only the title says what it is.
+        let untagged = json!({
+            "audio": [
+                { "lang": null, "title": "English" },
+                { "lang": null, "title": "German DTS-HD" }
+            ]
+        });
+        assert_eq!(pick_audio(&untagged, "de"), Some(1));
+        assert_eq!(pick_audio(&untagged, "xx"), None);
     }
 
     /// An unusable report must not cause blanket transcoding.

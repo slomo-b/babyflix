@@ -55,13 +55,6 @@ function langName(code?: string): string {
   return LANGS[code.toLowerCase().slice(0, 2)] || code.toUpperCase();
 }
 
-function isGermanTrack(lang?: string | null, title?: string | null): boolean {
-  const l = (lang || "").toLowerCase();
-  if (l === "de" || l === "ger" || l === "deu" || l.startsWith("de")) return true;
-  const t = (title || "").toLowerCase();
-  return t.includes("deutsch") || t.includes("german");
-}
-
 /** Countdown am Folgenende, bevor automatisch die nächste Folge startet. */
 const END_COUNTDOWN = 10;
 
@@ -290,6 +283,8 @@ export function Player() {
     let cancelled = false;
     let sessionToken: string | null = null;
     let remuxErr: string | null = null;
+    /** Wie oft diese Wiedergabe nach einem Abbruch neu aufgesetzt wurde. */
+    let remuxRestarts = 0;
 
     const ext = (current.ext || "").toLowerCase();
     const isVod = current.kind !== "live";
@@ -301,12 +296,21 @@ export function Player() {
 
     const directUrl = playerUrl(current.kind, current.id, current.ext);
 
-    const setupHls = (src: string, onFatal: () => void) => {
+    const setupHls = (src: string, onFatal: () => void, prepared = false) => {
       const hls = new Hls({
         // These panels deliver plain HLS with ~10 s segments and a 12 s target
         // duration - low-latency mode is meant for LL-HLS and only makes the
         // player chase the live edge (stalls and jumps back).
         lowLatencyMode: false,
+        // A stream prepared by our own FFmpeg is written as fast as the network
+        // allows - 11-24x realtime in a measurement. hls.js then sees a growing
+        // "live" playlist and starts at its edge (hls.js: `liveSyncPosition`),
+        // which is tens of minutes into the film, and repeats that on every
+        // restart. `startPosition: 0` pins it to the first segment instead.
+        startPosition: prepared ? 0 : -1,
+        // Never jump forward to catch up with a "live" edge - neither for a
+        // prepared film nor for a channel.
+        liveMaxLatencyDurationCount: Infinity,
         backBufferLength: 90,
         maxBufferLength: 30,
         enableWorker: true,
@@ -332,7 +336,6 @@ export function Player() {
       hls.on(Hls.Events.LEVEL_SWITCHED, () => setLevelIndex(hls.autoLevelEnabled ? -1 : hls.currentLevel));
       let networkRetries = 0;
       let mediaRetries = 0;
-      let stallRestarts = 0;
       hls.on(Hls.Events.ERROR, (_e, data) => {
         // hls.js cannot demux AC-3/E-AC-3 audio from MPEG-TS ("Unsupported EC-3 in
         // M2TS"). Those failures are *not* fatal and repeat for every fragment, so
@@ -367,10 +370,10 @@ export function Player() {
         // that was cleaned up after a long pause). Instead of dropping the viewer
         // into the error overlay mid-episode, continue with a fresh remux from the
         // current position.
-        if (isVod && remuxRef.current && stallRestarts < 2) {
+        if (isVod && remuxRef.current && remuxRestarts < 2) {
           const at = offsetRef.current + video.currentTime;
           if (at > 20) {
-            stallRestarts++;
+            remuxRestarts++;
             desiredOffset.current = { key: streamKey, at };
             setLoading(true);
             setSeekNonce((n) => n + 1);
@@ -390,30 +393,20 @@ export function Player() {
     const startPlayback = async () => {
       if (wantRemux) {
         try {
-          let audioIdx = remuxAudio;
-          let preAudio: { lang?: string | null; title?: string | null; codec?: string | null }[] = [];
-          if (!autoAudioRef.current) {
-            try {
-              const info = await api.streams(current.kind, current.id, current.ext);
-              if (cancelled) return;
-              preAudio = info.audio ?? [];
-              if (appLang === "de" && preAudio.length) {
-                const gi = preAudio.findIndex((a) => isGermanTrack(a.lang, a.title));
-                if (gi >= 0) audioIdx = gi;
-              }
-            } catch {
-              /* ignore */
-            }
-            autoAudioRef.current = true;
-          }
+          // The audio track is picked by the backend during the probe it needs
+          // anyway. Asking /api/streams first meant a second full ffprobe before
+          // anything started - measured 6.7 s on a real film.
+          const autoAudio = !autoAudioRef.current;
           const res = await api.remux(
             current.kind,
             current.id,
             current.ext,
-            audioIdx,
+            autoAudio ? undefined : remuxAudio,
             liveRemux,
-            seekAt > 1 ? seekAt : undefined
+            seekAt > 1 ? seekAt : undefined,
+            autoAudio ? appLang : undefined
           );
+          autoAudioRef.current = true;
           if (cancelled) {
             api.remuxStop(res.token);
             return;
@@ -422,7 +415,7 @@ export function Player() {
           remuxTokenRef.current = res.token;
           // Ab welcher Film-Sekunde dieser Stream läuft (0 = von vorne).
           offsetRef.current = res.offset ?? 0;
-          const audio = res.audio && res.audio.length ? res.audio : preAudio;
+          const audio = res.audio ?? [];
           if (audio.length) {
             setAudioTracks(
               audio.map((a, i) => ({
@@ -431,7 +424,7 @@ export function Player() {
               }))
             );
           }
-          setAudioIndex(audioIdx);
+          setAudioIndex(res.audio_index ?? 0);
           if (res.duration && res.duration > 0) setDuration(res.duration);
 
           // Text-Untertitel separat nach WebVTT holen (W4, Variante A). Bewusst
@@ -471,7 +464,7 @@ export function Player() {
               .catch(() => undefined); // ohne Untertitel weiterspielen
           }
 
-          setupHls(API_BASE + res.playlist, () => setError(true));
+          setupHls(API_BASE + res.playlist, () => setError(true), true);
           return;
         } catch (err) {
           // FFmpeg unavailable or remux failed -> try direct playback, but keep the reason
@@ -503,6 +496,25 @@ export function Player() {
     const onEnded = () => {
       setPlaying(false);
       if (endShownRef.current) return;
+      // A remux whose upstream connection dropped ends *normally*: FFmpeg closes
+      // the playlist with ENDLIST, hls.js reports "ended" - in the middle of the
+      // film. Continue from that position with a fresh remux instead of showing
+      // the end card.
+      const at = offsetRef.current + video.currentTime;
+      if (
+        isVod &&
+        remuxRef.current &&
+        remuxRestarts < 2 &&
+        durRef.current > 0 &&
+        at < durRef.current - 10
+      ) {
+        remuxRestarts++;
+        desiredOffset.current = { key: streamKey, at };
+        endShownRef.current = false;
+        setLoading(true);
+        setSeekNonce((n) => n + 1);
+        return;
+      }
       showEndRef.current();
     };
 
