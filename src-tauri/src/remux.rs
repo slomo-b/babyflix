@@ -856,16 +856,18 @@ impl Remux {
         self.keys.lock().unwrap().retain(|_, v| v != token);
     }
 
-    /// Kill sessions idle for more than 2 minutes.
+    /// Kill sessions that sat idle for a long time.
+    ///
+    /// Pausing is the normal case, not an abandoned session: at 120 s a five
+    /// minute pause destroyed the preparation and the film could not be resumed.
+    /// Both kinds now get half an hour; the player also pings while paused.
     pub fn reap(&self) {
         let now = Instant::now();
         let dead: Vec<String> = {
             let s = self.sessions.lock().unwrap();
             s.iter()
                 .filter(|(_, v)| {
-                    // A live stream may legitimately sit without requests (paused),
-                    // so it gets a far longer leash than an abandoned VOD session.
-                    let limit = if v.live { 1800 } else { 120 };
+                    let limit = if v.live { 3600 } else { 1800 };
                     now.duration_since(v.last) > Duration::from_secs(limit)
                 })
                 .map(|(k, _)| k.clone())

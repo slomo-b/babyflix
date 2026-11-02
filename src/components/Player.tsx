@@ -103,6 +103,8 @@ export function Player() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  /** Playlist der laufenden Vorbereitung - dient als Lebenszeichen beim Pausieren. */
+  const playlistRef = useRef<string | null>(null);
   const remuxRef = useRef(false);
   const remuxTokenRef = useRef<string | null>(null);
   const hideTimer = useRef<number | null>(null);
@@ -241,6 +243,19 @@ export function Player() {
     }
   }, [streamKey]);
 
+  // Die Vorbereitung wird nach 30 Minuten ohne Zugriff verworfen. Wer länger
+  // pausiert, verliert sie - deshalb fragen wir die Playlist minütlich ab,
+  // solange der Player offen ist und steht.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const v = videoRef.current;
+      const url = playlistRef.current;
+      if (!url || !v || !v.paused) return;
+      void fetch(url, { cache: "no-store" }).catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [streamKey]);
+
   // Tempo auf das Video übertragen – auch nach einem Streamwechsel.
   useEffect(() => {
     speedRef.current = speed;
@@ -367,6 +382,17 @@ export function Player() {
           setLiveRemuxFor(streamKey);
           return;
         }
+        // A prepared stream that reports a fatal network error has lost its
+        // session - the idle reaper removed it, or FFmpeg died. Retrying in place
+        // keeps failing, so start a fresh preparation at the current position.
+        const preparedAt = offsetRef.current + video.currentTime;
+        if (isVod && remuxRef.current && preparedAt > 20 && remuxRestarts < 2) {
+          remuxRestarts++;
+          desiredOffset.current = { key: streamKey, at: preparedAt };
+          setLoading(true);
+          setSeekNonce((n) => n + 1);
+          return;
+        }
         // Retry a few times (a segment may still be written by FFmpeg), then give up
         // with a visible error instead of spinning forever.
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 4) {
@@ -378,20 +404,6 @@ export function Player() {
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3 && !(isVod && remuxRef.current)) {
           hls.recoverMediaError();
           return;
-        }
-        // A remux session can stop early (a broken packet in the file, a session
-        // that was cleaned up after a long pause). Instead of dropping the viewer
-        // into the error overlay mid-episode, continue with a fresh remux from the
-        // current position.
-        if (isVod && remuxRef.current && remuxRestarts < 2) {
-          const at = offsetRef.current + video.currentTime;
-          if (at > 20) {
-            remuxRestarts++;
-            desiredOffset.current = { key: streamKey, at };
-            setLoading(true);
-            setSeekNonce((n) => n + 1);
-            return;
-          }
         }
         setErrorMsg(String(data.details || data.type || "fatal playback error"));
         onFatal();
@@ -477,6 +489,7 @@ export function Player() {
               .catch(() => undefined); // ohne Untertitel weiterspielen
           }
 
+          playlistRef.current = API_BASE + res.playlist;
           setupHls(API_BASE + res.playlist, () => setError(true), true);
           return;
         } catch (err) {
@@ -648,6 +661,7 @@ export function Player() {
       cleanup();
       video.removeAttribute("src");
       video.load();
+      playlistRef.current = null;
       if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

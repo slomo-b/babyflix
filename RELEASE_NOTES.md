@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.19
+
+- ⏸ **Pause as long as you like, then keep watching.** The preparation of a film was thrown away
+  after two minutes without activity — a five-minute pause therefore often left a film unresumable
+  and it had to be closed and restarted. It now survives 30 minutes, and the player keeps it alive
+  while it is paused.
+- 🔁 **If the preparation is lost anyway, playback resumes at the same spot by itself** instead of
+  landing in the error screen.
+
 ## 🆕 What's new in 1.5.18
 
 - 🔧 **Hotfix: 1.5.17 could not play anything.** A new player option was rejected by hls.js, so every

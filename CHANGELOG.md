@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.19] — 2026-11-02
+
+### Fixed
+- **A pause of a few minutes could make a film unresumable.** The preparation (FFmpeg session and
+  its segments) was discarded after **120 seconds** without a request — and a paused player requests
+  nothing. Resuming then hit a dead session, the player retried in place and nothing happened; only
+  closing the film and starting it again helped. Idle sessions now live 30 minutes (live channels
+  60), and the player pings its playlist once a minute while paused, so even a long pause keeps the
+  preparation alive.
+- **A lost session now recovers by itself.** A fatal network error on a prepared stream starts a
+  fresh preparation at the current position instead of retrying the dead session four times and then
+  showing the error overlay.
+
 ## [1.5.18] — 2026-10-31
 
 ### Fixed
