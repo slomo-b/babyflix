@@ -278,9 +278,13 @@ export function Player() {
     // Wo diese Session beginnt: eine offene Sprung-Anforderung (Remux-Neustart
     // mitten im Film) oder der Fortsetzungszeitpunkt aus dem Verlauf.
     const resume = history.find((h) => h.key === current.historyKey);
+    // Ein ausdrücklich gesetzter Start (auch 0) gewinnt gegen den Verlauf –
+    // so lässt sich ein Film bewusst von vorn beginnen.
+    const explicitStart =
+      typeof current.startAt === "number" ? Math.max(0, current.startAt) : undefined;
     const resumeAt =
-      current.startAt && current.startAt > 10
-        ? current.startAt
+      explicitStart !== undefined
+        ? explicitStart
         : resume && resume.position > 10
           ? resume.position
           : 0;
@@ -561,10 +565,20 @@ export function Player() {
       // Läuft der Stream schon an der gewünschten Stelle (Offset-Session), darf
       // nicht noch einmal gesprungen werden.
       if (offsetRef.current <= 0) {
-        const startAt = current.startAt;
-        if (startAt && startAt > 10 && current.kind !== "live" && video.duration > 0) {
-          video.currentTime = Math.min(startAt, Math.max(0, video.duration - 5));
-        } else if (resume && resume.position > 10 && current.kind !== "live" && video.duration > 0) {
+        if (
+          explicitStart !== undefined &&
+          explicitStart > 0 &&
+          current.kind !== "live" &&
+          video.duration > 0
+        ) {
+          video.currentTime = Math.min(explicitStart, Math.max(0, video.duration - 5));
+        } else if (
+          explicitStart === undefined &&
+          resume &&
+          resume.position > 10 &&
+          current.kind !== "live" &&
+          video.duration > 0
+        ) {
           video.currentTime = resume.position;
         }
       }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Film, Heart, Info, Play, Shuffle, Star, X } from "lucide-react";
+import { ArrowLeft, Film, Heart, Info, Play, RotateCcw, Shuffle, Star, X } from "lucide-react";
 import { api, imgUrl, Episode } from "../lib/api";
 import { useStore } from "../lib/store";
 import { asRating, fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
@@ -17,6 +17,8 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const [seasonIdx, setSeasonIdx] = useState(0);
   const [resumeBanner, setResumeBanner] = useState(false);
+  /** Timer für das automatische Fortsetzen – muss bei manuellem Start gestoppt werden. */
+  const autoResumeTimer = useRef<number | null>(null);
 
   const favKey = `${kind}:${id}`;
   const isFav = favorites.some((f) => f.key === favKey);
@@ -96,7 +98,8 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
     if (h.position <= 60 || h.position >= h.duration - 60) return;
     setResumeBanner(true);
     if (!autoResume) return;
-    const timer = setTimeout(() => {
+    autoResumeTimer.current = window.setTimeout(() => {
+      autoResumeTimer.current = null;
       setResumeBanner(false);
       play({
         kind: "movie",
@@ -109,8 +112,22 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
         startAt: h.position,
       });
     }, 6000);
-    return () => clearTimeout(timer);
+    return () => {
+      if (autoResumeTimer.current !== null) {
+        window.clearTimeout(autoResumeTimer.current);
+        autoResumeTimer.current = null;
+      }
+    };
   }, [id, kind, history, autoResume, play]);
+
+  /** Bricht das automatische Fortsetzen ab – etwa wenn bewusst neu gestartet wird. */
+  const cancelAutoResume = () => {
+    if (autoResumeTimer.current !== null) {
+      window.clearTimeout(autoResumeTimer.current);
+      autoResumeTimer.current = null;
+    }
+    setResumeBanner(false);
+  };
 
   // Panel-Werte nur übernehmen, wenn sie wie eine Bewertung aussehen – manche
   // Panels liefern dort das Jahr.
@@ -124,7 +141,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
   const year = yearOf(detail?.release_date);
   const duration = fmtDuration(detail?.duration);
 
-  const playMovie = () => {
+  const playMovie = (startAt?: number) => {
     if (!item) return;
     play({
       kind: "movie",
@@ -134,6 +151,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
       poster: item.cover ?? undefined,
       subtitle: year ?? undefined,
       historyKey: `movie:${item.id}`,
+      startAt,
     });
   };
 
@@ -283,7 +301,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                 <button
                   className="btn btn-primary shrink-0 px-3 py-1.5 text-xs"
                   onClick={() => {
-                    setResumeBanner(false);
+                    cancelAutoResume();
                     const h = historyResume;
                     if (!h || !item) return;
                     play({
@@ -302,7 +320,7 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                 </button>
                 <button
                   className="shrink-0 rounded-full px-2 py-1 text-xs text-[var(--muted)] transition hover:text-white"
-                  onClick={() => setResumeBanner(false)}
+                  onClick={() => cancelAutoResume()}
                   title={t("common.remove")}
                 >
                   <X size={15} />
@@ -310,20 +328,44 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
               </div>
             )}
             {kind === "movie" ? (
-              <button
-                className="btn btn-primary relative overflow-hidden py-3.5 text-base"
-                onClick={playMovie}
-              >
-                {movieProgress > 0 && (
-                  <span
-                    className="absolute inset-y-0 left-0 bg-white/25"
-                    style={{ width: `${movieProgress}%` }}
-                  />
-                )}
-                <span className="relative flex items-center gap-2">
-                  <Play size={20} fill="currentColor" /> {t("common.play")}
-                </span>
-              </button>
+              movieProgress > 0 && historyResume ? (
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    className="btn btn-primary relative overflow-hidden py-3.5 text-base"
+                    onClick={() => {
+                      cancelAutoResume();
+                      playMovie(historyResume.position);
+                    }}
+                  >
+                    <span
+                      className="absolute inset-y-0 left-0 bg-white/25"
+                      style={{ width: `${movieProgress}%` }}
+                    />
+                    <span className="relative flex items-center gap-2">
+                      <Play size={20} fill="currentColor" />{" "}
+                      {t("detail.resumeFrom", { time: fmtTimeClock(historyResume.position) })}
+                    </span>
+                  </button>
+                  <button
+                    className="btn btn-ghost w-full py-3.5 text-base"
+                    onClick={() => {
+                      cancelAutoResume();
+                      playMovie(0);
+                    }}
+                  >
+                    <RotateCcw size={18} /> {t("detail.restart")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn btn-primary relative overflow-hidden py-3.5 text-base"
+                  onClick={() => playMovie(0)}
+                >
+                  <span className="relative flex items-center gap-2">
+                    <Play size={20} fill="currentColor" /> {t("common.play")}
+                  </span>
+                </button>
+              )
             ) : (
               <button
                 className="btn btn-primary relative overflow-hidden py-3.5 text-base"

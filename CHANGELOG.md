@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.20] — 2026-11-04
+
+### Fixed
+- **Films stalled for 2–3 seconds mid-way and came back with delayed sound.** The panel closes its
+  HTTP connections in the middle of a file. FFmpeg treats that as a normal end of input, so the
+  preparation stopped early, the playlist ended and the player had to prepare everything again from
+  the current position — the black screen with the spinner.
+
+  Measured against a server that cuts the connection after 1 MB (FFmpeg 6.1.1, the bundled build):
+
+  | | result |
+  |---|---|
+  | without reconnect | reads **1.4 s** of the file, exit `0` (looks like a normal end) |
+  | with reconnect | reopens with `Range: 0, 1048576, 2097152, …` and keeps reading |
+
+  The input is now opened with `-reconnect 1 -reconnect_streamed 1
+  -reconnect_on_network_error 1 -reconnect_delay_max 5`, plus `-rw_timeout 15` so a connection that
+  dies silently is given up on instead of blocking forever.
+- **The reason for a stopped preparation is no longer invisible.** FFmpeg's messages went to
+  `/dev/null`; they are written to `babyflix-ffmpeg.log` in the temp directory now.
+
 ## [1.5.19] — 2026-11-02
 
 ### Fixed

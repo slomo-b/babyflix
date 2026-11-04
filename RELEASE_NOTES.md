@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.20
+
+- 🩹 **No more 2–3 second stalls in the middle of a film.** Your provider closes the connection in the
+  middle of a file; the preparation took that for the end of the film and had to start over — that
+  was the black screen with the spinner. It now reconnects and keeps reading instead. Verified
+  against a server that cuts the connection after 1 MB: without the fix FFmpeg read 1.4 s of a 30 s
+  file, with it the whole file.
+
 ## 🆕 What's new in 1.5.19
 
 - ⏸ **Pause as long as you like, then keep watching.** The preparation of a film was thrown away

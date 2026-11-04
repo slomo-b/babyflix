@@ -69,6 +69,18 @@ pub struct Remux {
     probe_cache: Mutex<HashMap<String, (Instant, Value)>>,
 }
 
+/// Where FFmpeg writes its warnings for the currently starting session.
+///
+/// One fixed file (not per session): it should outlive the session directory so a
+/// film that stopped early can still be explained afterwards.
+fn log_file() -> Stdio {
+    let path = std::env::temp_dir().join("babyflix-ffmpeg.log");
+    match std::fs::File::create(&path) {
+        Ok(f) => Stdio::from(f),
+        Err(_) => Stdio::null(),
+    }
+}
+
 /// Only relevant on Windows: spawn child processes without a console window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -738,10 +750,28 @@ impl Remux {
         let mut cmd = Command::new(&ffmpeg);
         cmd.arg("-hide_banner")
             .arg("-loglevel")
-            .arg("error")
+            .arg("warning")
             .arg("-nostdin")
             .arg("-user_agent")
-            .arg(UA);
+            .arg(UA)
+            // Panels close HTTP connections mid-file. FFmpeg then treats it as a
+            // normal end of input and stops - the film "ends" after a few minutes
+            // and the player has to prepare everything again (visible as a 2-3 s
+            // black screen). With reconnect it reopens and continues where it
+            // stopped.
+            .args([
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_on_network_error",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+                // A connection that dies without a close still has to be given up on.
+                "-rw_timeout",
+                "15000000",
+            ]);
         if offset > 0.0 {
             // Input seek: FFmpeg jumps inside the source instead of reading up to
             // there, which is what makes an arbitrary jump immediate.
@@ -799,7 +829,9 @@ impl Remux {
             .arg(dir.join("index.m3u8"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            // Keep the last run's messages: without them a preparation that stops
+            // early leaves no trace at all.
+            .stderr(log_file());
         hidden(&mut cmd);
         let child = cmd.spawn().map_err(|e| anyhow!("ffmpeg spawn failed: {e}"))?;
 
