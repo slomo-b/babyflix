@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.26
+
+- 🗂 **A clear overview for your downloads.** They are grouped into **Downloading now**,
+  **Available offline** and **Stopped & failed** — with count and size per group — and appear as
+  poster cards instead of a long list. Running downloads show the percentage on the poster and a
+  progress bar along its bottom edge.
+- 🔎 **Filter and sort:** All / Movies / Series / Active (with counts), plus Newest first, Title A–Z
+  and Largest first.
+
 ## 🆕 What's new in 1.5.25
 
 - 🛠 **Downloads no longer stop with "nicht gestartet" or "error decoding response body".** Two bugs:

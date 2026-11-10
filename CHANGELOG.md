@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.26] — 2026-11-10
+
+### Changed
+- **The Downloads page is a proper library now.** Instead of one long list it groups by state —
+  *Downloading now*, *Available offline*, *Stopped & failed* — each with a count and the total size.
+  Items are poster cards in a responsive grid, with a state badge (percentage while running), a
+  progress bar along the bottom edge of the poster, and play / resume / delete where they apply.
+- **Filters and sorting:** All / Movies / Series / Active (each with a count), plus Newest first,
+  Title A–Z and Largest first.
+
 ## [1.5.25] — 2026-11-10
 
 ### Fixed
