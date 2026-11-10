@@ -4,6 +4,12 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.22
+
+- ⚡ **Downloads are about six times faster.** Your provider limits every single connection to about
+  1.6 MB/s — BabyFlix now uses four connections in parallel, measured at **10.3 MB/s**. If a provider
+  does not allow that, the download quietly falls back to one connection.
+
 ## 🆕 What's new in 1.5.21
 
 - ⬇️ **Downloads — watch without internet.** Films and single episodes can be saved with one click and

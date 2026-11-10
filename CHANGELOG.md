@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.5.22] — 2026-11-10
+
+### Changed
+- **Downloads are about six times faster.** The provider throttles per connection — measured on a
+  real film: **1.6 MB/s** with one connection, **6.3 MB/s** with two, **10.3 MB/s** with four. Files
+  from 16 MB upwards are fetched in four parallel byte ranges straight into one pre-allocated file
+  (no concatenation, no second copy on disk). If a provider refuses ranges or extra connections, the
+  download falls back to a single stream automatically.
+
+  Verified by a test that downloads a 20 MB file through a range-capable server and compares the
+  result byte for byte.
+
+### Notes on "compress without losing quality"
+- Video is already compressed; re-encoding it *losslessly* makes files bigger, not smaller. Changing
+  the container (MKV → MP4) saves roughly 0.1 %.
+- The only lossless savings would be dropping tracks. A sampled film (Episode II) carries five:
+  HEVC video, DTS audio, two subtitle tracks and an embedded cover image. The subtitles are what the
+  subtitle feature uses, and the audio is the film itself — so there is nothing to drop without
+  losing function, and the gain would be a few percent at most.
+- Real savings always mean a **lossy re-encode** (e.g. HEVC CRF 20): typically 40–60 % smaller with
+  no visible difference, but slower than realtime. Not built yet.
+
 ## [1.5.21] — 2026-11-10
 
 ### Added
