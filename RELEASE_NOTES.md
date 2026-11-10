@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.25
+
+- 🛠 **Downloads no longer stop with "nicht gestartet" or "error decoding response body".** Two bugs:
+  a download without a known size was dropped instead of started, and your provider announces byte
+  ranges in a non-standard way — so every interruption started from zero again (Lord of the Rings
+  died at 368 MB of 5.3 GB). Both are fixed.
+- 🔁 **Long downloads survive many interruptions in a row**, each one continuing at the exact byte.
+
 ## 🆕 What's new in 1.5.24
 
 - ⚡ **Search is much faster.** Every search used to ask your provider for its category list — three

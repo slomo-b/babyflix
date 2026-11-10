@@ -182,11 +182,11 @@ impl Downloads {
             // The provider throttles per connection (measured: 1.6 MB/s on one,
             // 10.3 MB/s on four), so large files are fetched in parallel ranges.
             // If that is unsupported or fails, one stream takes over.
-            let mut result = Err(anyhow!("nicht gestartet"));
             let probed = probe_source(&client, &url).await;
             let total_hint = probed.map(|(t, _)| t).unwrap_or(0);
-            if let Some((total, ranges)) = probed {
-                if ranges && total >= PARALLEL_FROM {
+            let mut result = Err(anyhow!("nicht gestartet"));
+            match probed {
+                Some((total, true)) if total >= PARALLEL_FROM => {
                     {
                         let mut items = me.items.lock().unwrap();
                         if let Some(it) = items.iter_mut().find(|i| i.id == id) {
@@ -204,10 +204,13 @@ impl Downloads {
                                 .await;
                     }
                 }
-            }
-            if result.is_err() && !cancel.load(Ordering::Relaxed) && !part.exists() {
-                result =
-                    stream_to_file(&client, &url, &part, total_hint, &cancel, &me, &id).await;
+                // Everything else - including an unknown size or a failed probe -
+                // goes straight to the single stream. Dropping the attempt here is
+                // what produced "nicht gestartet".
+                _ => {
+                    result =
+                        stream_to_file(&client, &url, &part, total_hint, &cancel, &me, &id).await;
+                }
             }
             let cancelled = cancel.load(Ordering::Relaxed);
             let mut moved = false;
@@ -254,20 +257,20 @@ impl Downloads {
     }
 }
 
-/// Size of the source and whether it supports byte ranges.
+/// Size of the source and whether it honours byte ranges.
+///
+/// The range check is empirical - a ranged request answered with `206` - because
+/// panels send non-standard `Accept-Ranges` values (this one says
+/// `0-3225776938`), which made a perfectly range-capable source look incapable.
 async fn probe_source(client: &reqwest::Client, url: &str) -> Option<(u64, bool)> {
     let resp = client
         .get(url)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .header(reqwest::header::RANGE, "bytes=0-0")
         .send()
         .await
         .ok()?;
-    let ranges = resp
-        .headers()
-        .get(reqwest::header::ACCEPT_RANGES)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_ascii_lowercase().contains("bytes"))
-        .unwrap_or(false);
+    let ranged = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     let total = resp
         .headers()
         .get(reqwest::header::CONTENT_RANGE)
@@ -276,7 +279,7 @@ async fn probe_source(client: &reqwest::Client, url: &str) -> Option<(u64, bool)
         .and_then(|n| n.trim().parse::<u64>().ok())
         .or_else(|| resp.content_length())
         .unwrap_or(0);
-    (total > 0).then_some((total, ranges))
+    (total > 0).then_some((total, ranged))
 }
 
 /// Fetch the file in `PARALLEL_PARTS` ranges into one pre-allocated file.
@@ -343,11 +346,13 @@ async fn range_to_file(
 ) -> Result<u64> {
     let mut written: u64 = 0;
     let mut attempts = 0u32;
+    let mut idle = 0u32;
     loop {
         let from = start + written;
         if from > end {
             return Ok(written);
         }
+        let before = written;
         let resp = client
             .get(url)
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -359,10 +364,11 @@ async fn range_to_file(
             Ok(r) => bail!("Bereich {from}-{end} abgelehnt (HTTP {})", r.status()),
             Err(e) => {
                 attempts += 1;
-                if attempts > 10 {
+                idle += 1;
+                if idle > 5 || attempts > 40 {
                     bail!("Bereich {}: {e}", from);
                 }
-                tokio::time::sleep(Duration::from_millis(600)).await;
+                tokio::time::sleep(Duration::from_millis(700)).await;
                 continue;
             }
         };
@@ -391,23 +397,28 @@ async fn range_to_file(
         }
         file.flush().await?;
         drop(file);
+        if written > before {
+            idle = 0;
+        } else {
+            idle += 1;
+        }
         if failed.is_none() && start + written > end {
             return Ok(written);
         }
         attempts += 1;
-        if attempts > 10 {
+        if idle > 5 || attempts > 40 {
             return Err(failed.unwrap_or_else(|| anyhow!("Bereich brach wiederholt ab")));
         }
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        tokio::time::sleep(Duration::from_millis(700)).await;
     }
 }
 
 /// Copy the response body to `part`, reporting progress into the shared list.
 ///
 /// Panels drop connections mid-file (that is what `error decoding response body`
-/// was: an aborted body, not real data corruption). Instead of failing, the
-/// download reopens the file at the byte it reached and continues from there, so a
-/// dropped connection costs a second, not the whole film.
+/// was: an aborted body, not data corruption). Each drop reopens the file at the
+/// byte reached and continues. Long downloads can be interrupted dozens of times,
+/// so the limit counts attempts *without* progress, not attempts in total.
 async fn stream_to_file(
     client: &reqwest::Client,
     url: &str,
@@ -420,7 +431,9 @@ async fn stream_to_file(
     {
         let mut items = me.items.lock().unwrap();
         if let Some(it) = items.iter_mut().find(|i| i.id == id) {
-            it.total = total;
+            if it.total == 0 {
+                it.total = total;
+            }
         }
     }
 
@@ -431,8 +444,10 @@ async fn stream_to_file(
     }
 
     let mut attempts = 0u32;
+    let mut idle = 0u32;
     let mut last_save = Instant::now();
     loop {
+        let before = done;
         let mut request = client
             .get(url)
             // Never let the HTTP layer decode: a video file is not gzip, and a
@@ -449,10 +464,11 @@ async fn stream_to_file(
             Ok(r) => return Err(anyhow!("Anbieter antwortet mit HTTP {}", r.status())),
             Err(e) => {
                 attempts += 1;
-                if attempts > 10 {
+                idle += 1;
+                if idle > 5 || attempts > 80 {
                     return Err(anyhow!("Verbindung fehlgeschlagen: {e}"));
                 }
-                tokio::time::sleep(Duration::from_millis(600)).await;
+                tokio::time::sleep(Duration::from_millis(700)).await;
                 continue;
             }
         };
@@ -502,15 +518,20 @@ async fn stream_to_file(
         file.flush().await?;
         drop(file);
 
+        if done > before {
+            idle = 0;
+        } else {
+            idle += 1;
+        }
         let finished = failed.is_none() && (total == 0 || done >= total);
         if finished {
             return Ok(done);
         }
         attempts += 1;
-        if attempts > 10 {
+        if idle > 5 || attempts > 80 {
             return Err(failed.unwrap_or_else(|| anyhow!("Verbindung brach wiederholt ab")));
         }
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        tokio::time::sleep(Duration::from_millis(700)).await;
     }
 }
 
@@ -793,6 +814,60 @@ mod tests {
         let got = std::fs::read(&file).expect("read");
         assert_eq!(got.len(), data.len(), "size after resume");
         assert!(got == *data, "content must survive the dropped connection");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Without a Content-Length the probe cannot tell the size. That used to abort
+    /// the whole download ("nicht gestartet"); it has to stream from zero instead.
+    #[test]
+    fn a_source_without_length_still_downloads() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+
+        let body = b"no content length here".to_vec();
+        let served = body.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..6 {
+                let Ok((mut sock, _)) = listener.accept() else { continue };
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf);
+                // chunked: no Content-Length at all
+                let head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+                let _ = sock.write_all(head.as_bytes());
+                let _ = sock.write_all(format!("{:x}\r\n", served.len()).as_bytes());
+                let _ = sock.write_all(&served);
+                let _ = sock.write_all(b"\r\n0\r\n\r\n");
+            }
+        });
+
+        let dir = std::env::temp_dir().join(format!("babyflix-dl-nolen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dl = Arc::new(Downloads::new(dir.clone()));
+        let mut entry = info("movie-99");
+        entry.state = "running".into();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            dl.start(reqwest::Client::new(), format!("http://{addr}/f.mkv"), entry)
+                .expect("start");
+            for _ in 0..200 {
+                if dl.get("movie-99").map(|i| i.state) == Some("done".to_string()) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        });
+
+        let done = dl.get("movie-99").expect("entry");
+        assert_eq!(done.state, "done", "download failed: {:?}", done.error);
+        let file = dl.local_file("movie-99").expect("local file");
+        assert_eq!(std::fs::read(&file).unwrap(), body);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

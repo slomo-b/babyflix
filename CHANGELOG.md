@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.5.25] — 2026-11-10
+
+### Fixed
+- **Downloads showed "nicht gestartet".** When the size probe failed — no `Content-Length`, or a
+  ranged probe answered with `200` — the start routine dropped the attempt instead of falling back to
+  a plain stream. It always streams now and learns the size from the body.
+
+- **Downloads still aborted with "error decoding response body".** The range check read
+  `Accept-Ranges` and expected the word `bytes`, but this provider sends `0-3225776938`. A perfectly
+  range-capable source therefore looked incapable: every dropped connection restarted at byte 0, and
+  the retries ran out (the Lord of the Rings download died at 368 MB of 5.3 GB).
+
+  Range support is detected empirically now (`206 Partial Content`), verified against the provider:
+
+  | request | response |
+  |---|---|
+  | `Range: bytes=0-1048575` | `206`, `Content-Range: bytes 0-1048575/5709419639` |
+
+- **Retries count attempts without progress, not attempts in total.** A 5 GB file can be interrupted
+  dozens of times; each interruption resumes at the byte reached, so only five fruitless attempts in
+  a row give up.
+
 ## [1.5.24] — 2026-11-10
 
 ### Fixed
