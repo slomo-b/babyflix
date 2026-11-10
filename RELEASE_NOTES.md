@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.23
+
+- 🛠 **Downloads no longer fail after a while.** Your provider cuts the connection mid-file; the
+  download now continues at the exact byte instead of aborting with an error.
+- ▶️ **Resume button** for interrupted downloads — the part already fetched is kept, so nothing is
+  downloaded twice.
+
 ## 🆕 What's new in 1.5.22
 
 - ⚡ **Downloads are about six times faster.** Your provider limits every single connection to about

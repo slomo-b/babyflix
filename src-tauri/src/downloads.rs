@@ -183,7 +183,9 @@ impl Downloads {
             // 10.3 MB/s on four), so large files are fetched in parallel ranges.
             // If that is unsupported or fails, one stream takes over.
             let mut result = Err(anyhow!("nicht gestartet"));
-            if let Some((total, ranges)) = probe_source(&client, &url).await {
+            let probed = probe_source(&client, &url).await;
+            let total_hint = probed.map(|(t, _)| t).unwrap_or(0);
+            if let Some((total, ranges)) = probed {
                 if ranges && total >= PARALLEL_FROM {
                     {
                         let mut items = me.items.lock().unwrap();
@@ -194,21 +196,26 @@ impl Downloads {
                     result = segmented(&client, &url, &part, total, &cancel, &me, &id).await;
                     if result.is_err() && !cancel.load(Ordering::Relaxed) {
                         // Some providers refuse several connections: start over with one.
+                        // The parallel file is pre-allocated to full size, so it has to
+                        // go - otherwise a resume would think it was complete.
                         let _ = std::fs::remove_file(&part);
-                        result = stream_to_file(&client, &url, &part, &cancel, &me, &id).await;
+                        result =
+                            stream_to_file(&client, &url, &part, total_hint, &cancel, &me, &id)
+                                .await;
                     }
                 }
             }
             if result.is_err() && !cancel.load(Ordering::Relaxed) && !part.exists() {
-                result = stream_to_file(&client, &url, &part, &cancel, &me, &id).await;
+                result =
+                    stream_to_file(&client, &url, &part, total_hint, &cancel, &me, &id).await;
             }
             let cancelled = cancel.load(Ordering::Relaxed);
             let mut moved = false;
             if result.is_ok() {
                 moved = std::fs::rename(&part, &finished).is_ok();
-            } else {
-                let _ = std::fs::remove_file(&part);
             }
+            // On failure the partial file stays: starting the download again
+            // continues at that byte instead of fetching everything anew.
             {
                 let mut items = me.items.lock().unwrap();
                 if let Some(it) = items.iter_mut().find(|i| i.id == id) {
@@ -228,7 +235,9 @@ impl Downloads {
                         Err(e) => {
                             it.state = if cancelled { "stopped".into() } else { "error".into() };
                             if !cancelled {
-                                it.error = Some(e.to_string());
+                                it.error = Some(format!(
+                                    "{e} - erneut starten setzt an dieser Stelle fort"
+                                ));
                             }
                         }
                     }
@@ -332,86 +341,177 @@ async fn range_to_file(
     me: &Arc<Downloads>,
     id: &str,
 ) -> Result<u64> {
-    let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
-    file.seek(std::io::SeekFrom::Start(start)).await?;
-    let resp = client
-        .get(url)
-        .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
-        .send()
-        .await?;
-    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        bail!("Bereich {start}-{end} abgelehnt (HTTP {})", resp.status());
-    }
-    let mut resp = resp;
     let mut written: u64 = 0;
-    while let Some(chunk) = resp.chunk().await? {
-        if cancel.load(Ordering::Relaxed) {
-            bail!("abgebrochen");
+    let mut attempts = 0u32;
+    loop {
+        let from = start + written;
+        if from > end {
+            return Ok(written);
         }
-        file.write_all(&chunk).await?;
-        written += chunk.len() as u64;
-        let mut items = me.items.lock().unwrap();
-        if let Some(it) = items.iter_mut().find(|i| i.id == id) {
-            it.done += chunk.len() as u64;
+        let resp = client
+            .get(url)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .header(reqwest::header::RANGE, format!("bytes={from}-{end}"))
+            .send()
+            .await;
+        let mut resp = match resp {
+            Ok(r) if r.status() == reqwest::StatusCode::PARTIAL_CONTENT => r,
+            Ok(r) => bail!("Bereich {from}-{end} abgelehnt (HTTP {})", r.status()),
+            Err(e) => {
+                attempts += 1;
+                if attempts > 10 {
+                    bail!("Bereich {}: {e}", from);
+                }
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                continue;
+            }
+        };
+        let mut file = tokio::fs::OpenOptions::new().write(true).open(path).await?;
+        file.seek(std::io::SeekFrom::Start(from)).await?;
+        let mut failed: Option<anyhow::Error> = None;
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    if cancel.load(Ordering::Relaxed) {
+                        bail!("abgebrochen");
+                    }
+                    file.write_all(&chunk).await?;
+                    written += chunk.len() as u64;
+                    let mut items = me.items.lock().unwrap();
+                    if let Some(it) = items.iter_mut().find(|i| i.id == id) {
+                        it.done += chunk.len() as u64;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    failed = Some(anyhow!("{e}"));
+                    break;
+                }
+            }
         }
+        file.flush().await?;
+        drop(file);
+        if failed.is_none() && start + written > end {
+            return Ok(written);
+        }
+        attempts += 1;
+        if attempts > 10 {
+            return Err(failed.unwrap_or_else(|| anyhow!("Bereich brach wiederholt ab")));
+        }
+        tokio::time::sleep(Duration::from_millis(600)).await;
     }
-    file.flush().await?;
-    Ok(written)
 }
 
 /// Copy the response body to `part`, reporting progress into the shared list.
+///
+/// Panels drop connections mid-file (that is what `error decoding response body`
+/// was: an aborted body, not real data corruption). Instead of failing, the
+/// download reopens the file at the byte it reached and continues from there, so a
+/// dropped connection costs a second, not the whole film.
 async fn stream_to_file(
     client: &reqwest::Client,
     url: &str,
     part: &Path,
+    total: u64,
     cancel: &Arc<AtomicBool>,
     me: &Arc<Downloads>,
     id: &str,
 ) -> Result<u64> {
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| anyhow!("Verbindung fehlgeschlagen: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("Anbieter antwortet mit HTTP {}", resp.status()));
-    }
-    let hint = resp.content_length().unwrap_or(0);
     {
         let mut items = me.items.lock().unwrap();
         if let Some(it) = items.iter_mut().find(|i| i.id == id) {
-            it.total = hint;
+            it.total = total;
         }
     }
 
-    let mut file = tokio::fs::File::create(part).await?;
-    let mut resp = resp;
-    let mut done: u64 = 0;
+    // A previous run may have left bytes behind - continue there.
+    let mut done = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    if total > 0 && done >= total {
+        return Ok(done);
+    }
+
+    let mut attempts = 0u32;
     let mut last_save = Instant::now();
-    while let Some(chunk) = resp.chunk().await? {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("abgebrochen"));
+    loop {
+        let mut request = client
+            .get(url)
+            // Never let the HTTP layer decode: a video file is not gzip, and a
+            // mislabelled Content-Encoding aborts the body mid-transfer.
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
+        if done > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={done}-"));
         }
-        file.write_all(&chunk).await?;
-        done += chunk.len() as u64;
-        {
-            let mut items = me.items.lock().unwrap();
-            if let Some(it) = items.iter_mut().find(|i| i.id == id) {
-                it.done = done;
-                if it.total == 0 {
-                    it.total = hint;
+        let resp = match request.send().await {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) if done > 0 && r.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE => {
+                return Ok(done)
+            }
+            Ok(r) => return Err(anyhow!("Anbieter antwortet mit HTTP {}", r.status())),
+            Err(e) => {
+                attempts += 1;
+                if attempts > 10 {
+                    return Err(anyhow!("Verbindung fehlgeschlagen: {e}"));
+                }
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                continue;
+            }
+        };
+        if done > 0 && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            // The provider ignores ranges: start over instead of appending twice.
+            let _ = std::fs::remove_file(part);
+            done = 0;
+            continue;
+        }
+
+        let mut file = if done > 0 {
+            tokio::fs::OpenOptions::new().append(true).open(part).await?
+        } else {
+            tokio::fs::File::create(part).await?
+        };
+        let mut body = resp;
+        let mut failed: Option<anyhow::Error> = None;
+        loop {
+            match body.chunk().await {
+                Ok(Some(chunk)) => {
+                    if cancel.load(Ordering::Relaxed) {
+                        return Err(anyhow!("abgebrochen"));
+                    }
+                    file.write_all(&chunk).await?;
+                    done += chunk.len() as u64;
+                    {
+                        let mut items = me.items.lock().unwrap();
+                        if let Some(it) = items.iter_mut().find(|i| i.id == id) {
+                            it.done = done;
+                            if it.total == 0 {
+                                it.total = total;
+                            }
+                        }
+                    }
+                    if last_save.elapsed() >= Duration::from_secs(5) {
+                        me.save();
+                        last_save = Instant::now();
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    failed = Some(anyhow!("{e}"));
+                    break;
                 }
             }
         }
-        // Writing the index on every chunk would hammer the disk; the in-memory
-        // value is what the UI polls anyway.
-        if last_save.elapsed() >= Duration::from_secs(5) {
-            me.save();
-            last_save = Instant::now();
+        file.flush().await?;
+        drop(file);
+
+        let finished = failed.is_none() && (total == 0 || done >= total);
+        if finished {
+            return Ok(done);
         }
+        attempts += 1;
+        if attempts > 10 {
+            return Err(failed.unwrap_or_else(|| anyhow!("Verbindung brach wiederholt ab")));
+        }
+        tokio::time::sleep(Duration::from_millis(600)).await;
     }
-    file.flush().await?;
-    Ok(done)
 }
 
 /// Open a folder in the platform's file manager.
@@ -486,7 +586,7 @@ mod tests {
         let body = b"hello babyflix downloads".to_vec();
         let served = body.clone();
         std::thread::spawn(move || {
-            for _ in 0..2 {
+            for _ in 0..6 {
                 if let Ok((mut sock, _)) = listener.accept() {
                     let mut buf = [0u8; 1024];
                     let _ = sock.read(&mut buf);
@@ -606,6 +706,93 @@ mod tests {
         let got = std::fs::read(&file).expect("read");
         assert_eq!(got.len(), data.len(), "size");
         assert!(got == *data, "content must match byte for byte");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A body that ends early (the provider drops the connection - this is what
+    /// "error decoding response body" was) must be resumed, not restarted.
+    #[test]
+    fn a_dropped_connection_is_resumed() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+
+        let data: Arc<Vec<u8>> = Arc::new((0..6_000_000u32).map(|i| (i / 7 % 251) as u8).collect());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = data.clone();
+
+        std::thread::spawn(move || {
+            for _ in 0..8 {
+                let Ok((mut sock, _)) = listener.accept() else { continue };
+                let mut buf = [0u8; 2048];
+                let n = sock.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut range: Option<(u64, u64)> = None;
+                for line in req.lines() {
+                    if line.to_ascii_lowercase().starts_with("range:") {
+                        let v = line.split('=').nth(1).unwrap_or("").trim().to_string();
+                        let mut it = v.split('-');
+                        let a = it.next().unwrap_or("0").parse().unwrap_or(0);
+                        let b = it
+                            .next()
+                            .filter(|x| !x.is_empty())
+                            .and_then(|x| x.parse().ok())
+                            .unwrap_or(served.len() as u64 - 1);
+                        range = Some((a, b.min(served.len() as u64 - 1)));
+                    }
+                }
+                match range {
+                    Some((a, b)) => {
+                        let slice = &served[a as usize..=b as usize];
+                        let head = format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nContent-Range: bytes {}-{}/{}\r\nConnection: close\r\n\r\n",
+                            slice.len(), a, b, served.len()
+                        );
+                        let _ = sock.write_all(head.as_bytes());
+                        let _ = sock.write_all(slice);
+                    }
+                    None => {
+                        // First full request: promise everything, deliver 2 MB, cut.
+                        let head = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+                            served.len()
+                        );
+                        let _ = sock.write_all(head.as_bytes());
+                        let _ = sock.write_all(&served[..2_000_000]);
+                        // drop the socket without finishing the body
+                    }
+                }
+            }
+        });
+
+        let dir = std::env::temp_dir().join(format!("babyflix-dl-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dl = Arc::new(Downloads::new(dir.clone()));
+        let mut entry = info("movie-88");
+        entry.state = "running".into();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            dl.start(reqwest::Client::new(), format!("http://{addr}/f.mkv"), entry)
+                .expect("start");
+            for _ in 0..400 {
+                if dl.get("movie-88").map(|i| i.state) == Some("done".to_string()) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        });
+
+        let done = dl.get("movie-88").expect("entry");
+        assert_eq!(done.state, "done", "download failed: {:?}", done.error);
+        let file = dl.local_file("movie-88").expect("local file");
+        let got = std::fs::read(&file).expect("read");
+        assert_eq!(got.len(), data.len(), "size after resume");
+        assert!(got == *data, "content must survive the dropped connection");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

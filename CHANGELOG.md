@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.23] — 2026-11-10
+
+### Fixed
+- **Downloads stopped with "error decoding response body".** Two causes, both handled:
+
+  - The HTTP client was allowed to decode `Content-Encoding`, and a mislabelled or truncated body
+    aborts that decoder mid-file. Download requests now send `Accept-Encoding: identity`.
+  - The provider **drops the connection mid-file** — the same behaviour that made FFmpeg stop early
+    in 1.5.20. A download now reopens at the byte it reached and continues: in the single-stream path
+    and in each of the four parallel ranges.
+
+- **An interrupted download resumes instead of starting over.** The partial file is kept, the
+  Downloads page offers **Resume** for stopped/failed entries, and pressing download again on a film
+  or episode continues at that byte.
+
+  Verified by a test whose server promises the full file, delivers 2 MB and cuts the connection: the
+  result is still byte-identical to the source.
+
 ## [1.5.22] — 2026-11-10
 
 ### Changed

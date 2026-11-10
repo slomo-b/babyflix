@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, FolderOpen, Loader2, Play, Trash2, X } from "lucide-react";
+import { Download, FolderOpen, Loader2, Play, RotateCcw, Trash2, X } from "lucide-react";
 import { api, imgUrl, DownloadInfo } from "../lib/api";
 import { useStore } from "../lib/store";
 import { useT } from "../lib/i18n";
@@ -37,6 +37,21 @@ export default function Downloads() {
   const used = items.reduce((n, i) => n + (i.state === "done" ? i.total || i.done : 0), 0);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["downloads"] });
+
+  /** Nach einem Abbruch an der erreichten Stelle weitermachen. */
+  const resume = (d: DownloadInfo) =>
+    void api
+      .download({
+        kind: d.kind,
+        id: d.source_id,
+        title: d.title,
+        subtitle: d.subtitle ?? undefined,
+        poster: d.poster ?? undefined,
+        series_id: d.series_id ?? undefined,
+        ext: d.ext,
+      })
+      .catch(() => undefined)
+      .finally(refresh);
 
   const playLocal = (d: DownloadInfo) => {
     play({
@@ -139,6 +154,11 @@ export default function Downloads() {
                   {d.state === "done" && (
                     <button className="btn btn-primary py-2" onClick={() => playLocal(d)}>
                       <Play size={16} fill="currentColor" /> {t("downloads.play")}
+                    </button>
+                  )}
+                  {(d.state === "stopped" || d.state === "error") && (
+                    <button className="btn btn-primary py-2" onClick={() => resume(d)}>
+                      <RotateCcw size={16} /> {t("downloads.resume")}
                     </button>
                   )}
                   {d.state === "running" && (
