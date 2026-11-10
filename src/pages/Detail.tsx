@@ -679,6 +679,8 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                           subtitle: `S${epWithSeason.season} · E${ep.num} – ${ep.title}`,
                           poster: ep.cover ?? item?.cover ?? undefined,
                           series_id: item?.id,
+                          season: epWithSeason.season,
+                          episode: ep.num,
                           ext: ep.extension ?? undefined,
                         })
                       }

@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.27
+
+- 📺 **Series downloads, grouped.** Instead of one card per episode you now see **one card per series**
+  — click it and its episodes appear below, season by season. Downloaded episodes show size, play and
+  delete; the rest are dimmed and marked *Not downloaded*, so you see at a glance which episodes of a
+  series are still missing.
+
 ## 🆕 What's new in 1.5.26
 
 - 🗂 **A clear overview for your downloads.** They are grouped into **Downloading now**,

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.27] — 2026-11-10
+
+### Added
+- **Series downloads are grouped by series.** The Downloads page now shows one card per series
+  ("6 Folgen · 3.2 GB") instead of one card per episode. Clicking it opens a full-width episode list
+  below the grid:
+
+  - every episode of the seasons that have downloads, with the downloaded ones showing size, play and
+    delete,
+  - episodes that are **not** downloaded are dimmed and marked *Not downloaded* — so it is visible at
+    a glance which episodes of a series are still missing.
+
+- Season and episode numbers are stored with each download now (previously only inside the subtitle
+  text), which is what makes grouping and ordering reliable.
+
 ## [1.5.26] — 2026-11-10
 
 ### Changed

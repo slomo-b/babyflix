@@ -1106,6 +1106,10 @@ struct DownloadReq {
     #[serde(default)]
     series_id: Option<String>,
     #[serde(default)]
+    season: Option<i64>,
+    #[serde(default)]
+    episode: Option<i64>,
+    #[serde(default)]
     ext: Option<String>,
 }
 
@@ -1131,6 +1135,8 @@ async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq
         subtitle: req.subtitle,
         poster: req.poster,
         series_id: req.series_id,
+        season: req.season,
+        episode: req.episode,
         ext,
         total: 0,
         done: 0,

@@ -355,6 +355,8 @@ export const api = {
     subtitle?: string;
     poster?: string;
     series_id?: string;
+    season?: number;
+    episode?: number;
     ext?: string;
   }) => req<DownloadInfo>("/api/download", { method: "POST", body: JSON.stringify(body) }),
   downloadStop: (id: string) =>
@@ -379,6 +381,9 @@ export interface DownloadInfo {
   subtitle?: string | null;
   poster?: string | null;
   series_id?: string | null;
+  /** Bei Serien-Folgen: Staffel und Nummer. */
+  season?: number | null;
+  episode?: number | null;
   ext: string;
   total: number;
   done: number;

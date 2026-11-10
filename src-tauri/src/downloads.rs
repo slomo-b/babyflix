@@ -33,6 +33,11 @@ pub struct DownloadInfo {
     pub poster: Option<String>,
     /// Series id, so the player can continue with the next episode.
     pub series_id: Option<String>,
+    /// Staffel/Nummer, damit die Oberfläche Folgen einer Serie gruppieren kann.
+    #[serde(default)]
+    pub season: Option<i64>,
+    #[serde(default)]
+    pub episode: Option<i64>,
     pub ext: String,
     pub total: u64,
     pub done: u64,
@@ -563,6 +568,8 @@ mod tests {
             subtitle: None,
             poster: None,
             series_id: None,
+            season: None,
+            episode: None,
             ext: "mkv".into(),
             total: 0,
             done: 0,
