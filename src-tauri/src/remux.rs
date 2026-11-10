@@ -69,6 +69,12 @@ pub struct Remux {
     probe_cache: Mutex<HashMap<String, (Instant, Value)>>,
 }
 
+/// HTTP-only input options must not be passed for a local file - FFmpeg rejects
+/// them for the file protocol ("Option user_agent not found").
+fn is_remote(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
 /// Where FFmpeg writes its warnings for the currently starting session.
 ///
 /// One fixed file (not per session): it should outlive the session directory so a
@@ -606,7 +612,10 @@ impl Remux {
             // up, the conservative copy policy applies instead.
             cmd.args(["-probesize", "2000000", "-analyzeduration", "2000000"]);
         }
-        cmd.arg("-user_agent").arg(UA).arg(url);
+        if is_remote(url) {
+            cmd.arg("-user_agent").arg(UA);
+        }
+        cmd.arg(url);
         hidden(&mut cmd);
         let out = Self::output_with_timeout(&mut cmd, if live { 6 } else { 20 })?;
         if !out.status.success() {
@@ -751,27 +760,29 @@ impl Remux {
         cmd.arg("-hide_banner")
             .arg("-loglevel")
             .arg("warning")
-            .arg("-nostdin")
-            .arg("-user_agent")
-            .arg(UA)
-            // Panels close HTTP connections mid-file. FFmpeg then treats it as a
-            // normal end of input and stops - the film "ends" after a few minutes
-            // and the player has to prepare everything again (visible as a 2-3 s
-            // black screen). With reconnect it reopens and continues where it
-            // stopped.
-            .args([
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_on_network_error",
-                "1",
-                "-reconnect_delay_max",
-                "5",
-                // A connection that dies without a close still has to be given up on.
-                "-rw_timeout",
-                "15000000",
-            ]);
+            .arg("-nostdin");
+        if is_remote(url) {
+            cmd.arg("-user_agent")
+                .arg(UA)
+                // Panels close HTTP connections mid-file. FFmpeg then treats it as
+                // a normal end of input and stops - the film "ends" after a few
+                // minutes and the player has to prepare everything again (visible
+                // as a 2-3 s black screen). With reconnect it reopens and
+                // continues where it stopped.
+                .args([
+                    "-reconnect",
+                    "1",
+                    "-reconnect_streamed",
+                    "1",
+                    "-reconnect_on_network_error",
+                    "1",
+                    "-reconnect_delay_max",
+                    "5",
+                    // A connection that dies without a close still has to be given up on.
+                    "-rw_timeout",
+                    "15000000",
+                ]);
+        }
         if offset > 0.0 {
             // Input seek: FFmpeg jumps inside the source instead of reading up to
             // there, which is what makes an arbitrary jump immediate.

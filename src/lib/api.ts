@@ -10,7 +10,7 @@ export const API_BASE = "http://127.0.0.1:4523";
  */
 const hideAdultParam = () => String(useStore.getState().hideAdult);
 
-export type Kind = "movie" | "series" | "live";
+export type Kind = "movie" | "series" | "live" | "local";
 
 export interface MediaItem {
   id: string;
@@ -347,12 +347,47 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ token, indices }),
     }),
+  downloads: () => req<{ items: DownloadInfo[]; dir: string }>("/api/downloads"),
+  download: (body: {
+    kind: "movie" | "series";
+    id: string;
+    title: string;
+    subtitle?: string;
+    poster?: string;
+    series_id?: string;
+    ext?: string;
+  }) => req<DownloadInfo>("/api/download", { method: "POST", body: JSON.stringify(body) }),
+  downloadStop: (id: string) =>
+    req<{ ok: boolean }>(`/api/download/stop?id=${encodeURIComponent(id)}`).catch(() => ({ ok: false })),
+  downloadRemove: (id: string) =>
+    req<{ ok: boolean }>(`/api/download/remove?id=${encodeURIComponent(id)}`),
+  downloadsOpen: () => req<{ ok: boolean }>("/api/downloads/open", { method: "POST" }),
   streams: (kind: Kind, id: string, ext?: string) => {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);
     return req<StreamsResponse>(`/api/streams?${sp.toString()}`);
   },
 };
+
+/** Ein Film oder eine Folge, die offline vorliegt. */
+export interface DownloadInfo {
+  id: string;
+  /** Quelle: `movie` oder `series`. */
+  kind: "movie" | "series";
+  source_id: string;
+  title: string;
+  subtitle?: string | null;
+  poster?: string | null;
+  series_id?: string | null;
+  ext: string;
+  total: number;
+  done: number;
+  /** running | done | stopped | error */
+  state: "running" | "done" | "stopped" | "error";
+  error?: string | null;
+  file?: string | null;
+  created: number;
+}
 
 export function imgUrl(u: string | null | undefined): string | undefined {
   if (!u) return undefined;

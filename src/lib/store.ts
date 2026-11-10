@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export interface PlayNext {
-  kind: "movie" | "series" | "live";
+  kind: "movie" | "series" | "live" | "local";
   id: string;
   ext?: string;
   title: string;
@@ -10,7 +10,11 @@ export interface PlayNext {
 }
 
 export interface PlayRequest {
- kind: "movie" | "series" | "live";
+ kind: "movie" | "series" | "live" | "local";
+ /** Herkunft, wenn `kind` = `local` (heruntergeladene Datei): damit landet der
+  *  Verlauf beim selben Film wie beim Streamen. */
+ sourceKind?: "movie" | "series";
+ sourceId?: string;
  id: string;
  ext?: string;
  title: string;

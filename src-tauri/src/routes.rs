@@ -883,7 +883,6 @@ struct RemuxQ {
 }
 
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
-    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     if !app.remux.available() {
         // First run may still be downloading FFmpeg; if the initial attempt failed
         // (e.g. offline at startup), retry it in the background.
@@ -898,12 +897,27 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
                 .into(),
         ));
     }
-    let ext = q
-        .ext
-        .clone()
-        .filter(|e| !e.is_empty())
-        .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
-    let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
+    // A downloaded item plays from disk: no provider, no session and no network.
+    let (url, ext) = if q.kind == "local" {
+        let path = app
+            .downloads
+            .local_file(&q.id)
+            .ok_or(ApiError("Download not found.".into()))?;
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "mkv".to_string());
+        (path.to_string_lossy().to_string(), ext)
+    } else {
+        let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+        let ext = q
+            .ext
+            .clone()
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| xtream::preferred_ext(&s, &q.kind, None));
+        let url = xtream::stream_url(&s, &q.kind, &q.id, &ext);
+        (url, ext)
+    };
     let caps = {
         let report = app.capabilities.read().await;
         DecodeCaps::from_report(&report).unwrap_or_else(DecodeCaps::conservative)
@@ -1061,6 +1075,80 @@ async fn hls_file(
         .map_err(|e| ApiError(e.to_string()))
 }
 
+// ---------------- downloads ----------------
+
+#[derive(Deserialize)]
+struct DownloadReq {
+    kind: String,
+    id: String,
+    title: String,
+    #[serde(default)]
+    subtitle: Option<String>,
+    #[serde(default)]
+    poster: Option<String>,
+    #[serde(default)]
+    series_id: Option<String>,
+    #[serde(default)]
+    ext: Option<String>,
+}
+
+async fn downloads_list(State(app): State<Arc<App>>) -> Json<Value> {
+    Json(json!({
+        "items": app.downloads.list(),
+        "dir": app.downloads.dir().to_string_lossy(),
+    }))
+}
+
+async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq>) -> ApiResult {
+    let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
+    let ext = req
+        .ext
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| xtream::preferred_ext(&s, &req.kind, None));
+    let url = xtream::stream_url(&s, &req.kind, &req.id, &ext);
+    let info = crate::downloads::DownloadInfo {
+        id: format!("{}-{}", req.kind, req.id),
+        kind: req.kind,
+        source_id: req.id,
+        title: req.title,
+        subtitle: req.subtitle,
+        poster: req.poster,
+        series_id: req.series_id,
+        ext,
+        total: 0,
+        done: 0,
+        state: "running".into(),
+        error: None,
+        file: None,
+        created: 0,
+    };
+    let entry = app
+        .downloads
+        .start(app.client.clone(), url, info)
+        .map_err(|e| ApiError(e.to_string()))?;
+    Ok(Json(json!(entry)))
+}
+
+#[derive(Deserialize)]
+struct DownloadIdQ {
+    id: String,
+}
+
+async fn download_stop(State(app): State<Arc<App>>, Query(q): Query<DownloadIdQ>) -> Json<Value> {
+    app.downloads.stop(&q.id);
+    Json(json!({ "ok": true }))
+}
+
+async fn download_remove(State(app): State<Arc<App>>, Query(q): Query<DownloadIdQ>) -> ApiResult {
+    app.downloads.remove(&q.id).map_err(|e| ApiError(e.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn downloads_open(State(app): State<Arc<App>>) -> ApiResult {
+    crate::downloads::open_folder(app.downloads.dir()).map_err(|e| ApiError(e.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/api/health", get(health))
@@ -1083,6 +1171,11 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/remux/stop", get(remux_stop))
         .route("/api/subs", post(subs_start))
         .route("/api/streams", get(streams))
+        .route("/api/downloads", get(downloads_list))
+        .route("/api/download", post(download_start))
+        .route("/api/download/stop", get(download_stop))
+        .route("/api/download/remove", get(download_remove))
+        .route("/api/downloads/open", post(downloads_open))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
         .route("/api/img", get(img_h))

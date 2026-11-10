@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Film, Heart, Info, Play, RotateCcw, Shuffle, Star, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Check, Download, Film, Heart, Info, Loader2, Play, RotateCcw, Shuffle, Star, X } from "lucide-react";
 import { api, imgUrl, Episode } from "../lib/api";
 import { useStore } from "../lib/store";
 import { asRating, fmtDuration, fmtTimeClock, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
@@ -30,6 +30,24 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
     queryFn: () => api.detail(kind, id),
     enabled: !!id,
   });
+
+  const qc = useQueryClient();
+  /** Heruntergeladene/laufende Dateien, damit der Knopf seinen Zustand zeigt. */
+  const downloadsQ = useQuery({
+    queryKey: ["downloads"],
+    queryFn: api.downloads,
+    refetchInterval: 2000,
+  });
+  const dlById = useMemo(
+    () => new Map((downloadsQ.data?.items ?? []).map((d) => [d.id, d])),
+    [downloadsQ.data]
+  );
+  const startDownload = (body: Parameters<typeof api.download>[0]) => {
+    void api
+      .download(body)
+      .catch(() => undefined)
+      .finally(() => void qc.invalidateQueries({ queryKey: ["downloads"] }));
+  };
 
   const data = query.data;
   const item = data?.item;
@@ -394,6 +412,40 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
               </button>
             )}
 
+            {kind === "movie" && item && (() => {
+              const dl = dlById.get(`movie-${item.id}`);
+              const p = dl && dl.total ? Math.round((dl.done / dl.total) * 100) : 0;
+              return (
+                <button
+                  className="btn btn-ghost w-full py-3.5 text-base"
+                  disabled={dl?.state === "running" || dl?.state === "done"}
+                  onClick={() =>
+                    startDownload({
+                      kind: "movie",
+                      id: item.id,
+                      title: item.name,
+                      poster: item.cover ?? undefined,
+                      ext: item.extension ?? undefined,
+                    })
+                  }
+                >
+                  {dl?.state === "done" ? (
+                    <>
+                      <Check size={18} className="text-emerald-400" /> {t("detail.downloaded")}
+                    </>
+                  ) : dl?.state === "running" ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> {t("detail.downloading")} {p}%
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} /> {t("detail.download")}
+                    </>
+                  )}
+                </button>
+              );
+            })()}
+
             {flatEpisodes.length > 0 && (
               <button
                 className="btn btn-ghost w-full py-3.5 text-base"
@@ -558,11 +610,12 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                   const cover = imgUrl(ep.cover ?? item.cover);
                   const isLastWatched = lastWatchedEp?.id === ep.id;
                   const epProgress = progressOf(ep.id);
+                  const epDl = dlById.get(`series-${ep.id}`);
                   return (
+                    <div key={ep.id} className="flex items-stretch gap-2">
                     <button
-                      key={ep.id}
                       onClick={() => playEpisode(epWithSeason, resumeStartFor(epWithSeason))}
-                      className={`group relative flex w-full items-center gap-4 overflow-hidden rounded-2xl border p-3 text-left transition ${
+                      className={`group relative flex min-w-0 flex-1 items-center gap-4 overflow-hidden rounded-2xl border p-3 text-left transition ${
                         isLastWatched
                           ? "border-[var(--accent)]/60 bg-[var(--accent)]/[0.12] ring-1 ring-[var(--accent)]/30"
                           : "border-[var(--border)] bg-white/[0.03] hover:border-[var(--accent)]/40 hover:bg-white/[0.07]"
@@ -608,6 +661,37 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                         </span>
                       )}
                     </button>
+                    <button
+                      className="flex w-11 shrink-0 items-center justify-center rounded-2xl border border-[var(--border)] bg-white/[0.03] text-[var(--muted)] transition hover:border-[var(--accent)]/40 hover:text-white disabled:opacity-70"
+                      title={
+                        epDl?.state === "done"
+                          ? t("detail.downloaded")
+                          : epDl?.state === "running"
+                            ? t("detail.downloading")
+                            : t("detail.download")
+                      }
+                      disabled={epDl?.state === "running" || epDl?.state === "done"}
+                      onClick={() =>
+                        startDownload({
+                          kind: "series",
+                          id: ep.id,
+                          title: item?.name ?? "",
+                          subtitle: `S${epWithSeason.season} · E${ep.num} – ${ep.title}`,
+                          poster: ep.cover ?? item?.cover ?? undefined,
+                          series_id: item?.id,
+                          ext: ep.extension ?? undefined,
+                        })
+                      }
+                    >
+                      {epDl?.state === "done" ? (
+                        <Check size={17} className="text-emerald-400" />
+                      ) : epDl?.state === "running" ? (
+                        <Loader2 size={17} className="animate-spin" />
+                      ) : (
+                        <Download size={17} />
+                      )}
+                    </button>
+                    </div>
                   );
                 })}
                 {activeEpisodes.length === 0 && (

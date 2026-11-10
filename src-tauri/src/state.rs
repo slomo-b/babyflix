@@ -40,6 +40,8 @@ pub struct App {
     /// Capability report of the running webview (codec probing happens in the UI,
     /// because only the webview knows what its platform can decode).
     pub capabilities: RwLock<Value>,
+    /// Films/episodes downloaded for offline playback.
+    pub downloads: Arc<crate::downloads::Downloads>,
 }
 
 impl App {
@@ -53,6 +55,7 @@ impl App {
             .expect("http client");
         let _ = std::fs::create_dir_all(&dir);
         let remux = crate::remux::Remux::new(dir.join("hls"));
+        let downloads = std::sync::Arc::new(crate::downloads::Downloads::new(dir.join("downloads")));
         Arc::new(App {
             client,
             dir,
@@ -64,6 +67,7 @@ impl App {
             locks: RwLock::new(HashMap::new()),
             remux,
             capabilities: RwLock::new(Value::Null),
+            downloads,
         })
     }
 

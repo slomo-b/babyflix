@@ -1,4 +1,5 @@
 mod adult;
+mod downloads;
 mod imdb;
 mod m3u;
 mod proxy;

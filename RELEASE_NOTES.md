@@ -4,6 +4,17 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.21
+
+- ⬇️ **Downloads — watch without internet.** Films and single episodes can be saved with one click and
+  played offline afterwards. You find them under **Downloads** in the sidebar; the film page and every
+  episode row now has a download button.
+  - Saved **unchanged** (no re-encoding): best quality, as fast as your connection allows.
+  - Stored in the app's own folder — one click opens it in Finder.
+  - Progress bar, size and used space in the list, plus stop and delete.
+- 💾 **Nothing to manage by hand:** the files stay in BabyFlix, playback works exactly like streaming
+  (audio tracks, subtitles, continue watching).
+
 ## 🆕 What's new in 1.5.20
 
 - 🩹 **No more 2–3 second stalls in the middle of a film.** Your provider closes the connection in the

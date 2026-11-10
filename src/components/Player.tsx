@@ -748,8 +748,9 @@ export function Player() {
       if (!current) return;
       saveHistory({
         key: current.historyKey,
-        kind: current.kind,
-        id: current.id,
+        // A downloaded file belongs to the same history entry as its stream.
+        kind: current.sourceKind ?? (current.kind as "movie" | "series" | "live"),
+        id: current.sourceId ?? current.id,
         ext: current.ext,
         seriesId: seriesId ?? undefined,
         title: current.title,

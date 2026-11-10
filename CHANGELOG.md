@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.5.21] — 2026-11-10
+
+### Added
+- **Downloads for offline playback.** Films and single episodes can be saved with one click and then
+  play without a connection.
+
+  - The file is stored **as the provider delivers it** — no re-encoding, so the download runs at line
+    speed and nothing changes in quality (typically 2–10 GB per film).
+  - Location: the app's own folder, `…/com.babyflix.player/downloads/<kind>-<id>/source.<ext>`. A
+    button opens it in Finder (Explorer on Windows).
+  - New **Downloads** page in the sidebar: progress, size, play, stop, delete, total used space.
+    Downloads keep running while you use the app; an interrupted one appears as "stopped" after a
+    restart and can be started again.
+  - A download button sits on the film page and on every episode row.
+  - Playback uses the normal preparation path with the **local file** as input, so codecs, the
+    audio-track choice and subtitles behave exactly as when streaming — and no network is involved.
+  - The history entry is shared with the streamed version, so "continue watching" keeps working.
+
 ## [1.5.20] — 2026-11-04
 
 ### Fixed
