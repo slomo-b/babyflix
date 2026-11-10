@@ -33,6 +33,11 @@ pub struct App {
     pub session: RwLock<Option<Session>>,
     pub catalog: RwLock<HashMap<String, Catalog>>,
     pub imdb_cache: RwLock<HashMap<String, Option<ImdbInfo>>>,
+    /// Adult category ids per kind. Loading them costs a panel round-trip, and
+    /// every browse/search request needs them - the main reason a search felt slow.
+    pub adult_cache: RwLock<HashMap<String, (std::time::Instant, std::collections::HashSet<String>)>>,
+    /// When the IMDb cache was last written to disk.
+    imdb_saved: std::sync::Mutex<std::time::Instant>,
     pub ratings: RwLock<RatingStore>,
     pub ratings_started: AtomicBool,
     pub locks: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -56,12 +61,16 @@ impl App {
         let _ = std::fs::create_dir_all(&dir);
         let remux = crate::remux::Remux::new(dir.join("hls"));
         let downloads = std::sync::Arc::new(crate::downloads::Downloads::new(dir.join("downloads")));
+        // Before `dir` moves into the struct.
+        let imdb_cache = load_imdb_cache(&dir);
         Arc::new(App {
             client,
             dir,
             session: RwLock::new(None),
             catalog: RwLock::new(HashMap::new()),
-            imdb_cache: RwLock::new(HashMap::new()),
+            imdb_cache: RwLock::new(imdb_cache),
+            adult_cache: RwLock::new(HashMap::new()),
+            imdb_saved: std::sync::Mutex::new(std::time::Instant::now()),
             ratings: RwLock::new(RatingStore::default()),
             ratings_started: AtomicBool::new(false),
             locks: RwLock::new(HashMap::new()),
@@ -354,6 +363,41 @@ impl App {
             None => None,
         };
         self.imdb_cache.write().await.insert(key, info.clone());
+        self.save_imdb_throttled().await;
         info
     }
+
+    /// Write the IMDb cache to disk (at most every five seconds).
+    ///
+    /// It only lived in memory, so after every restart the first search resolved
+    /// all titles again - one network lookup per title, up to 60 per grid page.
+    pub async fn save_imdb_throttled(self: &Arc<Self>) {
+        {
+            let mut last = self.imdb_saved.lock().unwrap();
+            if last.elapsed() < std::time::Duration::from_secs(5) {
+                return;
+            }
+            *last = std::time::Instant::now();
+        }
+        self.save_imdb().await;
+    }
+
+    pub async fn save_imdb(self: &Arc<Self>) {
+        let map = self.imdb_cache.read().await.clone();
+        let path = self.dir.join("cache").join("imdb.json");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(text) = serde_json::to_string(&map) {
+            let _ = std::fs::write(path, text);
+        }
+    }
+}
+
+/// Previously resolved titles, so a restart does not start from zero.
+fn load_imdb_cache(dir: &std::path::Path) -> HashMap<String, Option<ImdbInfo>> {
+    std::fs::read_to_string(dir.join("cache").join("imdb.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
 }

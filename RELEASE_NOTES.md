@@ -4,6 +4,16 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.24
+
+- ⚡ **Search is much faster.** Every search used to ask your provider for its category list — three
+  times per search, about half a second each. That list is cached now: measured **0.6–1.0 s per
+  request before, ~0.1 s after**.
+- 🧠 **IMDb ratings survive a restart**, so a repeated search no longer resolves dozens of titles from
+  scratch.
+- 🔎 **The search page remembers your last search** and shows it again when you come back.
+- ✨ The thin coloured line at the left edge of the primary button is gone.
+
 ## 🆕 What's new in 1.5.23
 
 - 🛠 **Downloads no longer fail after a while.** Your provider cuts the connection mid-file; the

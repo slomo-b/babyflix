@@ -165,6 +165,10 @@ select {
 }
 .btn-primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
+  /* No border: with a transparent 1px border WebKit paints a thin coloured edge
+     where the gradient meets the border box - visible as a hairline on the left. */
+  border: none;
+  background-clip: padding-box;
   color: #fff;
   box-shadow: 0 14px 34px -14px rgba(139, 92, 246, 0.95);
 }

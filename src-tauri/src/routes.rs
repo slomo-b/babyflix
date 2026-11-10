@@ -265,14 +265,31 @@ async fn all_categories(app: &Arc<App>, kind: &str) -> Result<Vec<xtream::Catego
 /// Never fails a request: when the category list cannot be loaded, nothing is
 /// filtered - the page keeps working instead of returning an error.
 async fn adult_category_ids(app: &Arc<App>, kind: &str) -> HashSet<String> {
-    match all_categories(app, kind).await {
+    // Cached: this used to hit the panel on *every* browse/search request (three
+    // requests per search, serialised by the panel's single connection).
+    const TTL: std::time::Duration = std::time::Duration::from_secs(600);
+    {
+        let cache = app.adult_cache.read().await;
+        if let Some((at, ids)) = cache.get(kind) {
+            if at.elapsed() < TTL {
+                return ids.clone();
+            }
+        }
+    }
+    let ids: HashSet<String> = match all_categories(app, kind).await {
         Ok(cats) => cats
             .into_iter()
             .filter(|c| adult::is_adult_category(&c.name))
             .map(|c| c.id)
             .collect(),
-        Err(_) => HashSet::new(),
-    }
+        // A failed lookup is not cached, so the next request tries again.
+        Err(_) => return HashSet::new(),
+    };
+    app.adult_cache
+        .write()
+        .await
+        .insert(kind.to_string(), (std::time::Instant::now(), ids.clone()));
+    ids
 }
 
 /// Does the item belong to one of the given (adult) category ids?

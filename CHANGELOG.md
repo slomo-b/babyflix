@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.5.24] — 2026-11-10
+
+### Fixed
+- **Searching was slow because every request asked the provider for its category list.** The adult
+  filter needs the category names, and that lookup ran on *every* browse/search request — three times
+  per search and serialised by the panel's single connection. Measured on the running app:
+
+  | request | duration |
+  |---|---|
+  | browse without the adult filter (`hide_adult=false`) | 0.09–0.13 s |
+  | browse with it (`hide_adult=true`) | 0.61–1.03 s (panel round-trip alone: 0.52 s) |
+
+  The ids are cached for ten minutes now (a failed lookup is not cached), so a search no longer waits
+  for the provider.
+
+- **IMDb data of a search only lived in memory.** After every restart the first search resolved up to
+  60 titles again, one network lookup each. The cache is now stored on disk (`cache/imdb.json`) and
+  reused.
+
+- **A thin coloured hairline on the left edge of the primary button** (visible in WebKit): the
+  gradient was painted through the 1 px transparent border. The border is gone and the background is
+  clipped to the padding box.
+
+### Added
+- **The search page remembers the last query** and opens with it instead of an empty field.
+
 ## [1.5.23] — 2026-11-10
 
 ### Fixed

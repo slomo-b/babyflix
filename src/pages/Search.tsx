@@ -10,6 +10,7 @@ import { useOpen } from "../lib/useOpen";
 import { useScrollMemory } from "../lib/useScrollMemory";
 import { useEnrichment } from "../lib/useEnrichment";
 import { useT } from "../lib/i18n";
+import { useStore } from "../lib/store";
 
 /**
  * Treffer pro Seite. Vorher waren es 24 in einem horizontalen Regal, von dem nur
@@ -55,8 +56,11 @@ function PosterGrid({
 export default function Search() {
   const t = useT();
   const [params, setParams] = useSearchParams();
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const [term, setTerm] = useState(params.get("q") ?? "");
+  const lastSearch = useStore((s) => s.lastSearch);
+  const setLastSearch = useStore((s) => s.setLastSearch);
+  const initial = params.get("q") ?? lastSearch;
+  const [q, setQ] = useState(initial);
+  const [term, setTerm] = useState(initial);
   const { open, playItem } = useOpen();
   useScrollMemory("search");
 
@@ -66,6 +70,7 @@ export default function Search() {
   }, [q]);
 
   useEffect(() => {
+    setLastSearch(term);
     const cur = params.get("q") ?? "";
     if (cur !== term) setParams(term ? { q: term } : {}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps

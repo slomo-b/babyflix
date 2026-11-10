@@ -111,6 +111,9 @@ interface AppStore {
 
   /** Sprachpräfix für den Startseiten-Banner ("" = alle Sprachen). */
   heroLang: string;
+  /** Letzter Suchbegriff - die Suchseite startet damit, statt leer zu sein. */
+  lastSearch: string;
+  setLastSearch: (v: string) => void;
   setHeroLang: (v: string) => void;
 
   /** Remembered login, so the user stays signed in until the account is removed. */
@@ -166,7 +169,9 @@ export const useStore = create<AppStore>()(
       setCategorySidebarOpen: (v) => set({ categorySidebarOpen: v }),
 
       heroLang: "",
+      lastSearch: "",
       setHeroLang: (v) => set({ heroLang: v }),
+      setLastSearch: (v) => set({ lastSearch: v }),
 
       savedLogin: null,
       setSavedLogin: (v) => set({ savedLogin: v }),
@@ -189,6 +194,7 @@ export const useStore = create<AppStore>()(
         hideAdult: s.hideAdult,
         categorySidebarOpen: s.categorySidebarOpen,
         heroLang: s.heroLang,
+        lastSearch: s.lastSearch,
         savedLogin: s.savedLogin,
       }),
     }
