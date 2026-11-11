@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronDown,
   ChevronRight,
   Download,
   FolderOpen,
@@ -15,6 +15,7 @@ import { api, imgUrl, DownloadInfo } from "../lib/api";
 import { useStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { Select } from "../components/Select";
+import { initials, initialsColor } from "../lib/format";
 
 function fmtSize(bytes: number): string {
   if (!bytes) return "—";
@@ -29,18 +30,35 @@ function pct(d: DownloadInfo): number {
   return Math.min(100, Math.round((d.done / d.total) * 100));
 }
 
-/** "S3 · E1" - neu aus den Feldern, alt aus dem Untertitel geparst. */
-function episodeLabel(d: DownloadInfo): string {
-  if (d.season != null && d.episode != null) return `S${d.season} · E${d.episode}`;
-  const m = (d.subtitle ?? "").match(/^S(\d+)\s*·\s*E(\d+)/);
-  return m ? `S${m[1]} · E${m[2]}` : "";
-}
-
-/** Folgentitel: beim Download stand "S3 · E1 – <Titel>" im Untertitel. */
-function episodeTitle(d: DownloadInfo): string {
-  const sub = d.subtitle ?? "";
-  const idx = sub.indexOf("–");
-  return (idx >= 0 ? sub.slice(idx + 1) : sub).trim();
+function Cover({
+  poster,
+  title,
+  children,
+}: {
+  poster?: string | null;
+  title: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="relative aspect-[2/3] w-full overflow-hidden bg-[var(--surface-2)]">
+      {poster ? (
+        <img
+          src={imgUrl(poster)}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+        />
+      ) : (
+        <div
+          className="flex h-full w-full items-center justify-center text-3xl font-black tracking-tight text-white/90"
+          style={{ background: `linear-gradient(150deg, ${initialsColor(title)}, #12141d)` }}
+        >
+          {initials(title) || "?"}
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
 type Filter = "all" | "movie" | "series" | "active";
@@ -59,25 +77,23 @@ interface SeriesGroup {
 export default function Downloads() {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const play = useStore((s) => s.play);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("newest");
-  const [open, setOpen] = useState<string | null>(null);
 
   const { data } = useQuery({
     queryKey: ["downloads"],
     queryFn: api.downloads,
     refetchInterval: (query) =>
-      query.state.data?.items.some(
-        (i) => i.state === "running" || i.state === "queued"
-      )
+      query.state.data?.items.some((i) => i.state === "running" || i.state === "queued")
         ? 1000
         : 15000,
   });
 
   const all = data?.items ?? [];
-  const running = all.filter((i) => i.state === "running" || i.state === "queued");
+  const runningCount = all.filter((i) => i.state === "running" || i.state === "queued").length;
   const used = all.reduce((n, i) => n + (i.state === "done" ? i.total || i.done : 0), 0);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["downloads"] });
@@ -106,13 +122,15 @@ export default function Downloads() {
       title: d.title,
       subtitle: d.subtitle ?? undefined,
       poster: d.poster ?? undefined,
-      // Derselbe Verlaufseintrag wie beim Streamen, damit "Weiterschauen" stimmt.
       historyKey: `${d.kind}:${d.source_id}`,
       sourceKind: d.kind,
       sourceId: d.source_id,
       seriesId: d.series_id ?? undefined,
     });
   };
+
+  const openDetail = (d: DownloadInfo) =>
+    navigate(`/local/${d.kind === "series" ? "series" : "movie"}/${d.kind === "series" ? d.series_id ?? d.source_id : d.source_id}`);
 
   const remove = (d: DownloadInfo) =>
     void api.downloadRemove(d.id).then(() => {
@@ -122,11 +140,7 @@ export default function Downloads() {
 
   const filtered = useMemo(() => {
     const list = all.filter((d) =>
-      filter === "all"
-        ? true
-        : filter === "active"
-          ? d.state !== "done"
-          : d.kind === filter
+      filter === "all" ? true : filter === "active" ? d.state !== "done" : d.kind === filter
     );
     const bySize = (d: DownloadInfo) => d.total || d.done;
     return [...list].sort((a, b) =>
@@ -138,7 +152,6 @@ export default function Downloads() {
     );
   }, [all, filter, sort]);
 
-  // Queued entries belong to the active section: they wait for a free slot.
   const runningItems = filtered.filter((i) => i.state === "running" || i.state === "queued");
   const failedItems = filtered.filter(
     (i) => i.state === "stopped" || i.state === "error" || i.state === "paused"
@@ -146,7 +159,6 @@ export default function Downloads() {
   const doneItems = filtered.filter((i) => i.state === "done");
   const doneMovies = doneItems.filter((i) => i.kind === "movie");
 
-  /** Fertige Folgen zu je einer Serie zusammenfassen. */
   const seriesGroups = useMemo<SeriesGroup[]>(() => {
     const map = new Map<string, SeriesGroup>();
     for (const d of doneItems) {
@@ -164,15 +176,9 @@ export default function Downloads() {
       g.episodes.push(d);
       g.bytes += d.total || d.done;
       g.created = Math.max(g.created, d.created);
-      if (!g.poster && d.poster) g.poster = d.poster;
       map.set(key, g);
     }
     const groups = [...map.values()];
-    for (const g of groups) {
-      g.episodes.sort(
-        (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0)
-      );
-    }
     return groups.sort((a, b) =>
       sort === "title"
         ? a.title.localeCompare(b.title, "de")
@@ -189,9 +195,8 @@ export default function Downloads() {
     { key: "active", label: t("downloads.filter.active") },
   ];
 
-  const openGroup = seriesGroups.find((g) => g.key === open) ?? null;
-
-  const hasSomething = runningItems.length + failedItems.length + doneMovies.length + seriesGroups.length > 0;
+  const hasSomething =
+    runningItems.length + failedItems.length + doneMovies.length + seriesGroups.length > 0;
 
   return (
     <div className="animate-fade-in pt-6">
@@ -214,10 +219,7 @@ export default function Downloads() {
       </div>
 
       {data?.dir && (
-        <p
-          className="mt-2 select-all truncate text-xs text-[var(--muted)]"
-          title={data.dir}
-        >
+        <p className="mt-2 select-all truncate text-xs text-[var(--muted)]" title={data.dir}>
           {t("downloads.folder")}: {data.dir}
         </p>
       )}
@@ -268,7 +270,6 @@ export default function Downloads() {
             </div>
           )}
 
-          {/* Läuft gerade */}
           {runningItems.length > 0 && (
             <section className="mt-7">
               <SectionHead
@@ -281,6 +282,7 @@ export default function Downloads() {
                   <DownloadCard
                     key={d.id}
                     d={d}
+                    onOpen={openDetail}
                     onPlay={playLocal}
                     onResume={resume}
                     onStop={(x) => void api.downloadStop(x.id).then(refresh)}
@@ -293,7 +295,6 @@ export default function Downloads() {
             </section>
           )}
 
-          {/* Offline verfügbar: Filme + je eine Karte pro Serie */}
           {(doneMovies.length > 0 || seriesGroups.length > 0) && (
             <section className="mt-7">
               <SectionHead
@@ -306,6 +307,7 @@ export default function Downloads() {
                   <DownloadCard
                     key={d.id}
                     d={d}
+                    onOpen={openDetail}
                     onPlay={playLocal}
                     onResume={resume}
                     onStop={(x) => void api.downloadStop(x.id).then(refresh)}
@@ -314,89 +316,21 @@ export default function Downloads() {
                     setConfirm={setConfirm}
                   />
                 ))}
-                {seriesGroups.map((g) => {
-                  const expanded = open === g.key;
-                  return (
-                      <button
-                        key={g.key}
-                        className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white/[0.03] text-left transition hover:border-[var(--accent)]/40 hover:bg-white/[0.05] ${
-                          expanded ? "border-[var(--accent)]/50" : "border-[var(--border)]"
-                        }`}
-                        onClick={() => setOpen(expanded ? null : g.key)}
-                      >
-                        <span className="relative aspect-video w-full overflow-hidden bg-[var(--surface-2)]">
-                          {g.poster ? (
-                            <img
-                              src={imgUrl(g.poster)}
-                              alt=""
-                              loading="lazy"
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="flex h-full w-full items-center justify-center">
-                              <Download className="text-[var(--muted)]" />
-                            </span>
-                          )}
-                          <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white backdrop-blur">
-                            {t("downloads.episodesCount", { n: g.episodes.length })}
-                          </span>
-                          <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
-                            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">
-                              {expanded ? <ChevronDown size={22} /> : <ChevronRight size={22} />}
-                            </span>
-                          </span>
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-col gap-1 p-3">
-                          <span className="line-clamp-2 text-sm font-semibold leading-snug">
-                            {g.title}
-                          </span>
-                          <span className="mt-auto flex items-center justify-between gap-2 pt-2 text-[11px] text-[var(--muted)]">
-                            <span>
-                              {g.episodes.length} · {fmtSize(g.bytes)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                  );
-                })}
-              </div>
-
-              {/* Vollbreite Folgenliste der gewählten Serie */}
-              {openGroup && (
-                <div className="mt-5 rounded-2xl border border-[var(--accent)]/35 bg-white/[0.03] p-3">
-                  <div className="mb-2 flex items-start justify-between gap-3 px-1">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{openGroup.title}</div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {t("downloads.episodesCount", { n: openGroup.episodes.length })} ·{" "}
-                        {fmtSize(openGroup.bytes)}
-                      </div>
-                    </div>
-                    <button
-                      className="shrink-0 rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-white/10 hover:text-white"
-                      onClick={() => setOpen(null)}
-                      title={t("downloads.cancel")}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                  <SeriesEpisodes
-                    group={openGroup}
-                    onPlay={playLocal}
-                    onResume={resume}
-                    onDelete={remove}
-                    confirm={confirm}
-                    setConfirm={setConfirm}
+                {seriesGroups.map((g) => (
+                  <SeriesCard
+                    key={g.key}
+                    group={g}
+                    onOpen={() =>
+                      g.seriesId
+                        ? navigate(`/local/series/${g.seriesId}`)
+                        : navigate("/downloads")
+                    }
                   />
-                </div>
-              )}
+                ))}
+              </div>
             </section>
           )}
 
-          {/* Angehalten & Fehler */}
           {failedItems.length > 0 && (
             <section className="mt-7">
               <SectionHead
@@ -409,6 +343,7 @@ export default function Downloads() {
                   <DownloadCard
                     key={d.id}
                     d={d}
+                    onOpen={openDetail}
                     onPlay={playLocal}
                     onResume={resume}
                     onStop={(x) => void api.downloadStop(x.id).then(refresh)}
@@ -423,16 +358,16 @@ export default function Downloads() {
         </>
       )}
 
-      {running.length > 0 && (
+      {runningCount > 0 && (
         <p className="mt-6 text-xs text-[var(--muted)]">
-          {running.length} × {t("downloads.state.running")} · {data?.dir}
+          {runningCount} × {t("downloads.state.running")} · {data?.dir}
         </p>
       )}
     </div>
   );
 }
 
-const GRID = { gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))" } as const;
+const GRID = { gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))" } as const;
 
 function SectionHead({ title, count, bytes }: { title: string; count: number; bytes: number }) {
   return (
@@ -446,126 +381,160 @@ function SectionHead({ title, count, bytes }: { title: string; count: number; by
   );
 }
 
-/** Alle Folgen einer Serie: geladene zum Abspielen, fehlende ausgegraut. */
-function SeriesEpisodes({
-  group,
+function SeriesCard({ group, onOpen }: { group: SeriesGroup; onOpen: () => void }) {
+  const t = useT();
+  return (
+    <div
+      className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.03] transition hover:border-[var(--accent)]/40 hover:bg-white/[0.05]"
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onOpen()}
+    >
+      <Cover poster={group.poster} title={group.title}>
+        <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white backdrop-blur">
+          {t("downloads.episodesCount", { n: group.episodes.length })}
+        </span>
+        <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">
+            <ChevronRight size={22} />
+          </span>
+        </span>
+      </Cover>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+        <div className="line-clamp-2 text-sm font-semibold leading-snug">{group.title}</div>
+        <div className="mt-auto flex items-center justify-between gap-2 pt-1 text-[11px] text-[var(--muted)]">
+          <span>
+            {group.episodes.length} · {fmtSize(group.bytes)}
+          </span>
+          <ChevronRight size={15} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DownloadCard({
+  d,
+  onOpen,
   onPlay,
   onResume,
+  onStop,
   onDelete,
   confirm,
   setConfirm,
 }: {
-  group: SeriesGroup;
+  d: DownloadInfo;
+  onOpen: (d: DownloadInfo) => void;
   onPlay: (d: DownloadInfo) => void;
   onResume: (d: DownloadInfo) => void;
+  onStop: (d: DownloadInfo) => void;
   onDelete: (d: DownloadInfo) => void;
   confirm: string | null;
   setConfirm: (id: string | null) => void;
 }) {
   const t = useT();
-  const seriesId = group.seriesId;
-  // Optional: die vollständige Folgenliste der Serie, um fehlende Folgen zu zeigen.
-  const { data } = useQuery({
-    queryKey: ["detail", "series", seriesId],
-    queryFn: () => api.detail("series", seriesId as string),
-    enabled: !!seriesId,
-    staleTime: 1000 * 60 * 60,
-    retry: false,
-  });
-
-  const downloaded = useMemo(() => {
-    const map = new Map<string, DownloadInfo>();
-    for (const d of group.episodes) map.set(d.source_id, d);
-    return map;
-  }, [group.episodes]);
-
-  const seasons = (data?.seasons ?? []).filter((s) =>
-    s.episodes.some((e) => downloaded.has(e.id))
-  );
+  const p = pct(d);
+  const failed = d.state === "stopped" || d.state === "error" || d.state === "paused";
+  const playable = d.state === "done";
 
   return (
-    <div>
-      {seasons.length === 0 ? (
-        <ul className="divide-y divide-[var(--border)]">
-          {group.episodes.map((d) => {
-            const link = false;
-            return (
-              <li key={d.id} className="flex items-center gap-2 px-2 py-2">
-                <span className="w-20 shrink-0 text-xs font-semibold text-[var(--accent-2)]">
-                  {episodeLabel(d)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs">{episodeTitle(d)}</span>
-                <span className="shrink-0 text-[11px] text-[var(--muted)]">
-                  {fmtSize(d.total || d.done)}
-                </span>
-                <IconButton label={t("downloads.play")} onClick={() => onPlay(d)}>
-                  <Play size={14} fill="currentColor" />
-                </IconButton>
-                <DeleteButton
-                  id={d.id}
-                  onDelete={onDelete}
-                  d={d}
-                  confirm={confirm}
-                  setConfirm={setConfirm}
-                />
-                {link && null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        seasons.map((season) => (
-          <div key={season.number} className="mb-1 last:mb-0">
-            <div className="px-2 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">
-              {t("downloads.season", { n: season.number })}
-            </div>
-            <ul className="divide-y divide-[var(--border)]">
-              {season.episodes.map((ep) => {
-                const d = downloaded.get(ep.id);
-                return (
-                  <li
-                    key={ep.id}
-                    className={`flex items-center gap-2 px-2 py-2 ${
-                      d ? "" : "opacity-45"
-                    }`}
-                  >
-                    <span className="w-8 shrink-0 text-xs font-semibold text-[var(--accent-2)]">
-                      E{ep.num}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs">{ep.title}</span>
-                    {d ? (
-                      <>
-                        <span className="shrink-0 text-[11px] text-[var(--muted)]">
-                          {fmtSize(d.total || d.done)}
-                        </span>
-                        <IconButton label={t("downloads.play")} onClick={() => onPlay(d)}>
-                          <Play size={14} fill="currentColor" />
-                        </IconButton>
-                        <DeleteButton
-                          id={d.id}
-                          onDelete={onDelete}
-                          d={d}
-                          confirm={confirm}
-                          setConfirm={setConfirm}
-                        />
-                        {d.state !== "done" && (
-                          <IconButton label={t("downloads.resume")} onClick={() => onResume(d)}>
-                            <RotateCcw size={14} />
-                          </IconButton>
-                        )}
-                      </>
-                    ) : (
-                      <span className="shrink-0 text-[11px] text-[var(--muted)]">
-                        {t("downloads.notDownloaded")}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.03] transition hover:border-[var(--accent)]/40 hover:bg-white/[0.05]">
+      <div
+        className="relative cursor-pointer"
+        onClick={() => onOpen(d)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === "Enter" && onOpen(d)}
+        title={t("local.openDetails")}
+      >
+        <Cover poster={d.poster} title={d.title}>
+          <span
+            className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide backdrop-blur ${
+              d.state === "done"
+                ? "bg-emerald-500/85 text-emerald-50"
+                : d.state === "running" || d.state === "queued"
+                  ? "bg-[var(--accent)]/85 text-white"
+                  : "bg-black/70 text-rose-200"
+            }`}
+          >
+            {d.state === "running"
+              ? `${p}%`
+              : d.state === "queued"
+                ? t("downloads.state.queued")
+                : d.state === "done"
+                  ? t("downloads.state.done")
+                  : d.state === "paused"
+                    ? t("downloads.state.paused")
+                    : t("downloads.state.stopped")}
+          </span>
+
+          {playable && (
+            <button
+              className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPlay(d);
+              }}
+              title={t("downloads.play")}
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">
+                <Play size={20} fill="currentColor" />
+              </span>
+            </button>
+          )}
+
+          {d.state === "running" && (
+            <span className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
+              <span
+                className="block h-full bg-[var(--accent)] transition-[width]"
+                style={{ width: `${Math.max(2, p)}%` }}
+              />
+            </span>
+          )}
+        </Cover>
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+        <button className="text-left" onClick={() => onOpen(d)}>
+          <div className="line-clamp-2 text-sm font-semibold leading-snug">{d.title}</div>
+          {d.subtitle && (
+            <div className="mt-0.5 truncate text-xs text-[var(--muted)]">{d.subtitle}</div>
+          )}
+        </button>
+
+        <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+          <span className="text-[11px] text-[var(--muted)]">
+            {fmtSize(d.state === "done" ? d.total || d.done : d.done)}
+            {d.state !== "done" && d.total ? ` / ${fmtSize(d.total)}` : ""}
+          </span>
+          <span className="flex items-center gap-1">
+            {d.state === "running" || d.state === "queued" ? (
+              <IconButton label={t("downloads.stop")} onClick={() => onStop(d)}>
+                <Loader2 size={15} className={d.state === "running" ? "animate-spin" : ""} />
+              </IconButton>
+            ) : null}
+            {failed && (
+              <IconButton label={t("downloads.resume")} onClick={() => onResume(d)}>
+                <RotateCcw size={15} />
+              </IconButton>
+            )}
+            <DeleteButton
+              id={d.id}
+              d={d}
+              onDelete={onDelete}
+              confirm={confirm}
+              setConfirm={setConfirm}
+            />
+          </span>
+        </div>
+
+        {d.state === "error" && d.error && (
+          <div className="line-clamp-2 text-[11px] text-rose-300" title={d.error}>
+            {d.error}
           </div>
-        ))
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -623,126 +592,5 @@ function DeleteButton({
     <IconButton label={t("downloads.remove")} onClick={() => setConfirm(id)}>
       <Trash2 size={14} />
     </IconButton>
-  );
-}
-
-function DownloadCard({
-  d,
-  onPlay,
-  onResume,
-  onStop,
-  onDelete,
-  confirm,
-  setConfirm,
-}: {
-  d: DownloadInfo;
-  onPlay: (d: DownloadInfo) => void;
-  onResume: (d: DownloadInfo) => void;
-  onStop: (d: DownloadInfo) => void;
-  onDelete: (d: DownloadInfo) => void;
-  confirm: string | null;
-  setConfirm: (id: string | null) => void;
-}) {
-  const t = useT();
-  const p = pct(d);
-  const failed = d.state === "stopped" || d.state === "error" || d.state === "paused";
-  return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.03] transition hover:border-[var(--accent)]/40 hover:bg-white/[0.05]">
-      <button
-        className="relative aspect-video w-full overflow-hidden bg-[var(--surface-2)]"
-        onClick={() => d.state === "done" && onPlay(d)}
-        disabled={d.state !== "done"}
-        title={d.state === "done" ? t("downloads.play") : undefined}
-      >
-        {d.poster ? (
-          <img
-            src={imgUrl(d.poster)}
-            alt=""
-            loading="lazy"
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center">
-            <Download className="text-[var(--muted)]" />
-          </span>
-        )}
-
-        <span
-          className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide backdrop-blur ${
-            d.state === "done"
-              ? "bg-emerald-500/85 text-emerald-50"
-              : d.state === "running" || d.state === "queued"
-                ? "bg-[var(--accent)]/85 text-white"
-                : "bg-black/70 text-rose-200"
-          }`}
-        >
-          {d.state === "running"
-            ? `${p}%`
-            : d.state === "queued"
-              ? t("downloads.state.queued")
-              : d.state === "done"
-                ? t("downloads.state.done")
-                : d.state === "paused"
-                  ? t("downloads.state.paused")
-                  : t("downloads.state.stopped")}
-        </span>
-
-        {d.state === "done" && (
-          <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-black shadow-lg">
-              <Play size={20} fill="currentColor" />
-            </span>
-          </span>
-        )}
-
-        {d.state === "running" && (
-          <span className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
-            <span
-              className="block h-full bg-[var(--accent)] transition-[width]"
-              style={{ width: `${Math.max(2, p)}%` }}
-            />
-          </span>
-        )}
-      </button>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
-        <div className="line-clamp-2 text-sm font-semibold leading-snug">{d.title}</div>
-        {d.subtitle && (
-          <div className="truncate text-xs text-[var(--muted)]">{d.subtitle}</div>
-        )}
-
-        <div className="mt-auto flex items-center justify-between gap-2 pt-2">
-          <span className="text-[11px] text-[var(--muted)]">
-            {fmtSize(d.state === "done" ? d.total || d.done : d.done)}
-            {d.state !== "done" && d.total ? ` / ${fmtSize(d.total)}` : ""}
-          </span>
-          <span className="flex items-center gap-1">
-            {d.state === "running" && (
-              <IconButton label={t("downloads.stop")} onClick={() => onStop(d)}>
-                <Loader2 size={15} className="animate-spin" />
-              </IconButton>
-            )}
-            {failed && (
-              <IconButton label={t("downloads.resume")} onClick={() => onResume(d)}>
-                <RotateCcw size={15} />
-              </IconButton>
-            )}
-            <DeleteButton
-              id={d.id}
-              d={d}
-              onDelete={onDelete}
-              confirm={confirm}
-              setConfirm={setConfirm}
-            />
-          </span>
-        </div>
-
-        {d.state === "error" && d.error && (
-          <div className="line-clamp-2 text-[11px] text-rose-300" title={d.error}>
-            {d.error}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

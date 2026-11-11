@@ -376,6 +376,36 @@ impl App {
         }
     }
 
+    /// Fetch the detail page data for downloads that were created before it was
+    /// stored with them, so the offline detail view has content for old entries too.
+    pub async fn warm_download_meta(self: &Arc<Self>) {
+        if self.session().await.is_none() {
+            return;
+        }
+        let mut wanted: Vec<(String, String)> = Vec::new();
+        for d in self.downloads.list() {
+            let (kind, id) = if d.kind == "series" {
+                match d.series_id.clone() {
+                    Some(sid) => ("series".to_string(), sid),
+                    None => continue,
+                }
+            } else {
+                ("movie".to_string(), d.source_id.clone())
+            };
+            if self.downloads.read_meta(&kind, &id).is_some() {
+                continue;
+            }
+            if !wanted.contains(&(kind.clone(), id.clone())) {
+                wanted.push((kind, id));
+            }
+        }
+        for (kind, id) in wanted {
+            if let Ok(payload) = crate::routes::build_detail(self, &kind, &id).await {
+                self.downloads.write_meta(&kind, &id, &payload);
+            }
+        }
+    }
+
     /// Enrich a title with keyless IMDb data (cached, in-flight-safe enough for desktop).
     pub async fn imdb_enrich(self: &Arc<Self>, title: &str, year: Option<i32>, kind: &str) -> Option<ImdbInfo> {
         let key = format!(

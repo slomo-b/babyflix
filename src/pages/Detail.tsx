@@ -677,7 +677,9 @@ export default function Detail({ kind }: { kind: "movie" | "series" }) {
                           id: ep.id,
                           title: item?.name ?? "",
                           subtitle: `S${epWithSeason.season} · E${ep.num} – ${ep.title}`,
-                          poster: ep.cover ?? item?.cover ?? undefined,
+                          // Serien-Poster statt Folgen-Still: das 2:3-Cover der
+                          // Karte bleibt so sauber statt eines beschnittenen Standbilds.
+                          poster: item?.cover ?? ep.cover ?? undefined,
                           series_id: item?.id,
                           season: epWithSeason.season,
                           episode: ep.num,

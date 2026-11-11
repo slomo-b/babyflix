@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.30
+
+- 🖼 **Clean covers for everything you downloaded** — real poster format instead of cropped
+  thumbnails, with a neat initials tile when no artwork exists.
+- 📄 **A proper detail page for downloads.** Click a card and you get the same view as when streaming:
+  backdrop, poster, rating, plot, cast and, for series, every episode with what you already have. It
+  works **offline** because the data is stored with the download. Missing episodes can be downloaded
+  right from there.
+
 ## 🆕 What's new in 1.5.29
 
 - 🛡 **The one-time move of your existing downloads is failure-proof.** If a folder cannot be moved,

@@ -348,6 +348,11 @@ export const api = {
       body: JSON.stringify({ token, indices }),
     }),
   downloads: () => req<{ items: DownloadInfo[]; dir: string }>("/api/downloads"),
+  /** Detail data stored with the download (works without the provider). */
+  localDetail: (kind: "movie" | "series", id: string) =>
+    req<DetailResponse>(
+      `/api/local_detail?kind=${kind}&id=${encodeURIComponent(id)}`
+    ),
   download: (body: {
     kind: "movie" | "series";
     id: string;

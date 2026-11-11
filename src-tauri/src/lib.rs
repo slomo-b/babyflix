@@ -65,6 +65,7 @@ pub fn run() {
                 // Interrupted downloads continue on their own, even without network
                 // (they keep retrying until it is back).
                 boot_state.resume_downloads().await;
+                boot_state.warm_download_meta().await;
                 boot_state.ensure_ratings();
             });
 

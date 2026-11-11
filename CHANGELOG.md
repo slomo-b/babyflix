@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.30] — 2026-11-11
+
+### Added
+- **Downloads open their own detail page.** Clicking a downloaded film or series shows the same
+  layout as when streaming: backdrop, poster, year, rating, plot, cast and — for series — the full
+  episode list with the episodes you already have. The data is a copy stored with the download, so
+  the page works **without internet**. Missing episodes can be downloaded right there.
+- **Stored metadata for older downloads** is filled in automatically in the background on the next
+  online start, so existing entries get the same view.
+
+### Changed
+- **Download cards use real poster artwork** (2:3) instead of landscape thumbnails that cropped
+  portrait covers, with a clean initials tile when no image exists. Episode downloads now save the
+  series poster rather than a still.
+- The play button on a card still starts playback immediately; clicking anywhere else opens the
+  detail page.
+
 ## [1.5.29] — 2026-11-11
 
 ### Fixed

@@ -20,6 +20,7 @@ import Watchlist from "./pages/Watchlist";
 import Detail from "./pages/Detail";
 import Settings from "./pages/Settings";
 import Downloads from "./pages/Downloads";
+import LocalDetail from "./pages/LocalDetail";
 
 function Splash() {
   const t = useT();
@@ -90,6 +91,8 @@ export default function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/downloads" element={<Downloads />} />
+            <Route path="/local/movie/:id" element={<LocalDetail kind="movie" />} />
+            <Route path="/local/series/:id" element={<LocalDetail kind="series" />} />
             <Route path="/movie/:id" element={<Detail kind="movie" />} />
             <Route path="/series/:id" element={<Detail kind="series" />} />
             <Route path="/settings" element={<Settings />} />

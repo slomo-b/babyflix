@@ -530,18 +530,24 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
     if app.is_m3u().await {
         return m3u_detail(&app, &q).await;
     }
+    Ok(Json(build_detail(&app, &q.kind, &q.id).await?))
+}
+
+/// The detail payload, shared by the streaming page and the copy stored with a
+/// download (so the offline detail view shows the same content).
+pub(crate) async fn build_detail(app: &Arc<App>, kind: &str, id: &str) -> Result<Value, ApiError> {
     let s = app.session().await.ok_or(ApiError("Not signed in.".into()))?;
     // A panel that answers a detail request with a web page (broken id, blocked
     // request, rate limit, expired session) must not turn the page into a dead
     // end. Fall back to what the catalog already knows and mark the result as
     // incomplete, so the UI can say that the detail data is missing.
     let mut incomplete = false;
-    let mut md = if q.kind == "series" {
-        match xtream::series_detail(&app.client, &s, &q.id).await {
+    let mut md = if kind == "series" {
+        match xtream::series_detail(&app.client, &s, &id).await {
             Ok(md) => md,
-            Err(e) => match app.find_item(&q.id).await {
+            Err(e) => match app.find_item(&id).await {
                 Some(item) => {
-                    eprintln!("[babyflix] series detail unavailable for {}: {e}", q.id);
+                    eprintln!("[babyflix] series detail unavailable for {}: {e}", id);
                     incomplete = true;
                     xtream::MovieDetail {
                         item,
@@ -553,11 +559,11 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
             },
         }
     } else {
-        match xtream::movie_detail(&app.client, &s, &q.id).await {
+        match xtream::movie_detail(&app.client, &s, &id).await {
             Ok(md) => md,
-            Err(e) => match app.find_item(&q.id).await {
+            Err(e) => match app.find_item(&id).await {
                 Some(item) => {
-                    eprintln!("[babyflix] movie detail unavailable for {}: {e}", q.id);
+                    eprintln!("[babyflix] movie detail unavailable for {}: {e}", id);
                     incomplete = true;
                     xtream::MovieDetail {
                         item,
@@ -571,7 +577,7 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
     };
     // enrich with keyless IMDb (rating/votes/poster/cast)
     let year = parse_year(md.detail.release_date.as_deref());
-    let imdb = app.imdb_enrich(&md.item.name, year, &q.kind).await;
+    let imdb = app.imdb_enrich(&md.item.name, year, &kind).await;
     if let Some(i) = &imdb {
         if md.item.cover.is_none() {
             md.item.cover = i.image.clone();
@@ -589,13 +595,13 @@ async fn detail(State(app): State<Arc<App>>, Query(q): Query<DetailQ>) -> ApiRes
             md.detail.rating = i.rating;
         }
     }
-    Ok(Json(json!({
+    Ok(json!({
         "item": md.item,
         "detail": md.detail,
         "seasons": md.seasons,
         "imdb": imdb,
         "incomplete": incomplete,
-    })))
+    }))
 }
 
 /// Detail for M3U-sourced items: metadata from the playlist + keyless IMDb enrichment.
@@ -1127,6 +1133,12 @@ async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq
         .filter(|e| !e.is_empty())
         .unwrap_or_else(|| xtream::preferred_ext(&s, &req.kind, None));
     let url = xtream::stream_url(&s, &req.kind, &req.id, &ext);
+    // Which detail page belongs to this download (episodes share the series one).
+    let meta_kind = if req.kind == "series" {
+        req.series_id.clone().map(|sid| ("series".to_string(), sid))
+    } else {
+        Some(("movie".to_string(), req.id.clone()))
+    };
     let info = crate::downloads::DownloadInfo {
         id: format!("{}-{}", req.kind, req.id),
         kind: req.kind,
@@ -1145,6 +1157,19 @@ async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq
         file: None,
         created: 0,
     };
+    // Keep the detail page data with the download, so the offline detail view can
+    // show the same plot/cast/episodes as the streaming page.
+    let meta_app = app.clone();
+    if let Some((k, id)) = meta_kind {
+        tokio::spawn(async move {
+            if meta_app.downloads.read_meta(&k, &id).is_none() {
+                if let Ok(payload) = build_detail(&meta_app, &k, &id).await {
+                    meta_app.downloads.write_meta(&k, &id, &payload);
+                }
+            }
+        });
+    }
+
     let entry = app
         .downloads
         .start(app.client.clone(), url, info)
@@ -1170,6 +1195,23 @@ async fn download_remove(State(app): State<Arc<App>>, Query(q): Query<DownloadId
 async fn downloads_open(State(app): State<Arc<App>>) -> ApiResult {
     crate::downloads::open_folder(app.downloads.dir()).map_err(|e| ApiError(e.to_string()))?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct LocalDetailQ {
+    kind: String,
+    id: String,
+}
+
+/// Detail data stored with the download - works without the provider.
+async fn local_detail(State(app): State<Arc<App>>, Query(q): Query<LocalDetailQ>) -> ApiResult {
+    if let Some(meta) = app.downloads.read_meta(&q.kind, &q.id) {
+        return Ok(Json(meta));
+    }
+    // Not cached yet (for example an older download): build it now and keep it.
+    let payload = build_detail(&app, &q.kind, &q.id).await?;
+    app.downloads.write_meta(&q.kind, &q.id, &payload);
+    Ok(Json(payload))
 }
 
 pub fn router(app: Arc<App>) -> Router {
@@ -1199,6 +1241,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/download/stop", get(download_stop))
         .route("/api/download/remove", get(download_remove))
         .route("/api/downloads/open", post(downloads_open))
+        .route("/api/local_detail", get(local_detail))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
         .route("/api/img", get(img_h))

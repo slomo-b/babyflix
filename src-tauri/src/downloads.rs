@@ -7,6 +7,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -131,6 +132,27 @@ impl Downloads {
 
     pub fn get(&self, id: &str) -> Option<DownloadInfo> {
         self.items.lock().unwrap().iter().find(|i| i.id == id).cloned()
+    }
+
+    /// Where the detail page data of an item is cached (one file per title).
+    fn meta_path(&self, kind: &str, id: &str) -> PathBuf {
+        self.root.join(".meta").join(format!("{kind}-{id}.json"))
+    }
+
+    /// Detail data for the offline detail view (plot, cast, episodes, ...).
+    pub fn read_meta(&self, kind: &str, id: &str) -> Option<Value> {
+        let text = std::fs::read_to_string(self.meta_path(kind, id)).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    pub fn write_meta(&self, kind: &str, id: &str, payload: &Value) {
+        let path = self.meta_path(kind, id);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(text) = serde_json::to_string(payload) {
+            let _ = std::fs::write(path, text);
+        }
     }
 
     /// Local file of a finished download - what the remux reads instead of a URL.
