@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.31] — 2026-11-11
+
+### Fixed
+- **Some downloads showed a placeholder title like "Film #1608660".** For a few films the provider
+  answers `get_vod_info` with an empty info block, so the item was named `Film #<id>`. Missing name,
+  cover, extension and rating are now filled from the catalogue entry, which always has them. This
+  also fixes the streaming detail page, and stored copies are repaired on the next request.
+- **Some downloads had no cover at all** (the provider delivers no artwork for those titles). The
+  cover is now taken from the stored detail data — which includes the IMDb image — and written into
+  the download entry, so the card keeps its poster. Existing entries are repaired on the next online
+  start.
+
 ## [1.5.30] — 2026-11-11
 
 ### Added

@@ -4,6 +4,12 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.31
+
+- 🏷 **Correct titles and covers for every download.** Some titles appeared as "Film #1608660" or
+  without artwork because your provider returned no info for them. BabyFlix now fills the gaps from
+  the catalogue and from IMDb — including for downloads you already have.
+
 ## 🆕 What's new in 1.5.30
 
 - 🖼 **Clean covers for everything you downloaded** — real poster format instead of cropped

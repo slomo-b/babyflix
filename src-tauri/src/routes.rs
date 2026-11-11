@@ -575,6 +575,31 @@ pub(crate) async fn build_detail(app: &Arc<App>, kind: &str, id: &str) -> Result
             },
         }
     };
+    // Some panels answer get_vod_info with an empty info block; the item then gets
+    // a placeholder name ("Film #1608660"). The catalogue entry always carries the
+    // real title and cover, so fill every gap from it.
+    if let Some(cat) = app.find_item(id).await {
+        let placeholder = md.item.name.trim().is_empty()
+            || md.item.name.starts_with("Film #")
+            || md.item.name.starts_with("Serie #");
+        if placeholder {
+            incomplete = true;
+            md.item.name = cat.name.clone();
+        }
+        if md.item.cover.is_none() {
+            md.item.cover = cat.cover.clone();
+        }
+        if md.item.extension.is_none() {
+            md.item.extension = cat.extension.clone();
+        }
+        if md.item.rating.is_none() {
+            md.item.rating = cat.rating;
+        }
+        if md.item.category_id.is_none() {
+            md.item.category_id = cat.category_id.clone();
+        }
+    }
+
     // enrich with keyless IMDb (rating/votes/poster/cast)
     let year = parse_year(md.detail.release_date.as_deref());
     let imdb = app.imdb_enrich(&md.item.name, year, &kind).await;
@@ -1161,9 +1186,17 @@ async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq
     // show the same plot/cast/episodes as the streaming page.
     let meta_app = app.clone();
     if let Some((k, id)) = meta_kind {
+        let entry_id = format!("{}-{}", if k == "series" { "series" } else { "movie" }, id);
         tokio::spawn(async move {
             if meta_app.downloads.read_meta(&k, &id).is_none() {
                 if let Ok(payload) = build_detail(&meta_app, &k, &id).await {
+                    if let Some(cover) = payload
+                        .get("item")
+                        .and_then(|i| i.get("cover"))
+                        .and_then(|c| c.as_str())
+                    {
+                        meta_app.downloads.set_poster(&entry_id, cover);
+                    }
                     meta_app.downloads.write_meta(&k, &id, &payload);
                 }
             }
@@ -1206,6 +1239,20 @@ struct LocalDetailQ {
 /// Detail data stored with the download - works without the provider.
 async fn local_detail(State(app): State<Arc<App>>, Query(q): Query<LocalDetailQ>) -> ApiResult {
     if let Some(meta) = app.downloads.read_meta(&q.kind, &q.id) {
+        // A stored copy from before the catalogue fallback may still say "Film #id".
+        let placeholder = meta
+            .get("item")
+            .and_then(|i| i.get("name"))
+            .and_then(|n| n.as_str())
+            .map(|n| n.starts_with("Film #") || n.starts_with("Serie #") || n.trim().is_empty())
+            .unwrap_or(true);
+        if !placeholder {
+            return Ok(Json(meta));
+        }
+        if let Ok(payload) = build_detail(&app, &q.kind, &q.id).await {
+            app.downloads.write_meta(&q.kind, &q.id, &payload);
+            return Ok(Json(payload));
+        }
         return Ok(Json(meta));
     }
     // Not cached yet (for example an older download): build it now and keep it.

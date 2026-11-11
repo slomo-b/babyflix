@@ -59,9 +59,16 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
   const activeSeason = seasons[Math.min(seasonIdx, Math.max(0, seasons.length - 1))];
 
   const movieDownload = bySource.get(`movie:${id}`);
+  // Der Anbieter liefert bei manchen Titeln gar keine Infos - dann steht dort nur
+  // "Film #<id>". Fallback: der beim Download gespeicherte Name.
+  const seriesTitle = downloads.find((d) => d.series_id === id)?.title;
+  const rawTitle = item?.name ?? "";
+  const placeholder = !rawTitle.trim() || /^(Film|Serie) #\d+/.test(rawTitle);
+  const title = placeholder
+    ? movieDownload?.title ?? seriesTitle ?? (rawTitle.trim() || t("local.unknown"))
+    : rawTitle;
   const poster = imgUrl(imdb?.image ?? item?.cover ?? movieDownload?.poster);
   const backdrop = imgUrl(detail?.backdrop ?? item?.cover ?? movieDownload?.poster);
-  const title = item?.name ?? movieDownload?.title ?? t("local.unknown");
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["downloads"] });
 

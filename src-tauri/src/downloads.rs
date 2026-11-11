@@ -134,6 +134,18 @@ impl Downloads {
         self.items.lock().unwrap().iter().find(|i| i.id == id).cloned()
     }
 
+    /// Fill in a cover that the provider did not deliver (found later via IMDb or
+    /// from the stored detail data), so the card is not left blank.
+    pub fn set_poster(&self, id: &str, poster: &str) {
+        let mut items = self.items.lock().unwrap();
+        if let Some(it) = items.iter_mut().find(|i| i.id == id) {
+            if it.poster.as_deref().map(|p| p.trim().is_empty()).unwrap_or(true) {
+                it.poster = Some(poster.to_string());
+                self.save_locked(&items);
+            }
+        }
+    }
+
     /// Where the detail page data of an item is cached (one file per title).
     fn meta_path(&self, kind: &str, id: &str) -> PathBuf {
         self.root.join(".meta").join(format!("{kind}-{id}.json"))
