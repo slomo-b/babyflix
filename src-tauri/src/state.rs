@@ -400,17 +400,15 @@ impl App {
             }
         }
         for (kind, id) in wanted {
-            if let Ok(payload) = crate::routes::build_detail(self, &kind, &id).await {
+            if let Ok(mut payload) = crate::routes::build_detail(self, &kind, &id).await {
+                crate::routes::cache_cover(self, &kind, &id, &mut payload).await;
                 self.downloads.write_meta(&kind, &id, &payload);
             }
         }
 
-        // Covers that the provider never delivered: take them from the stored
-        // detail data (which build_detail filled from IMDb when possible).
+        // Covers: store them locally (remote URLs are useless offline) and point the
+        // download cards at the local copy.
         for d in self.downloads.list() {
-            if d.poster.as_deref().map(|p| !p.trim().is_empty()).unwrap_or(false) {
-                continue;
-            }
             let (kind, id) = if d.kind == "series" {
                 match d.series_id.clone() {
                     Some(sid) => ("series".to_string(), sid),
@@ -419,15 +417,24 @@ impl App {
             } else {
                 ("movie".to_string(), d.source_id.clone())
             };
-            if let Some(meta) = self.downloads.read_meta(&kind, &id) {
-                if let Some(cover) = meta
-                    .get("item")
-                    .and_then(|i| i.get("cover"))
-                    .and_then(|c| c.as_str())
-                    .filter(|c| !c.trim().is_empty())
-                {
-                    self.downloads.set_poster(&d.id, cover);
+            let Some(mut meta) = self.downloads.read_meta(&kind, &id) else {
+                continue;
+            };
+            if self.downloads.read_meta_image(&kind, &id).is_none() {
+                if let Some(local) = crate::routes::cache_cover(self, &kind, &id, &mut meta).await {
+                    self.downloads.write_meta(&kind, &id, &meta);
+                    self.downloads.set_poster(&d.id, &local);
+                    continue;
                 }
+            }
+            let cover = meta
+                .get("item")
+                .and_then(|i| i.get("cover"))
+                .and_then(|c| c.as_str())
+                .filter(|c| !c.trim().is_empty())
+                .map(str::to_string);
+            if let Some(cover) = cover {
+                self.downloads.set_poster(&d.id, &cover);
             }
         }
     }

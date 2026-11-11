@@ -30,6 +30,12 @@ function pct(d: DownloadInfo): number {
   return Math.min(100, Math.round((d.done / d.total) * 100));
 }
 
+/** Local images come from the app itself; everything else goes through the proxy. */
+function mediaUrl(u?: string | null): string | undefined {
+  if (!u) return undefined;
+  return u.startsWith("http://127.0.0.1") ? u : imgUrl(u);
+}
+
 function Cover({
   poster,
   title,
@@ -43,7 +49,7 @@ function Cover({
     <div className="relative aspect-[2/3] w-full overflow-hidden bg-[var(--surface-2)]">
       {poster ? (
         <img
-          src={imgUrl(poster)}
+          src={mediaUrl(poster)}
           alt=""
           loading="lazy"
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"

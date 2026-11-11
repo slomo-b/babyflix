@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.32] — 2026-11-11
+
+### Changed
+- **Detail pages prefer IMDb data.** Title, plot, cast, rating, genres, year and the poster come from
+  IMDb wherever it has them; the provider values are only the fallback (its `rating` is often just
+  the release year). The language tag is stripped from the displayed title
+  (`DE - Ziemlich beste Freunde (2011)` → `Ziemlich beste Freunde (2011)`), and the IMDb lookup now
+  searches without that prefix and the year — which fixes titles that previously found no match.
+- **Downloads store their detail page completely, including the artwork.** The cover is downloaded
+  and saved next to the metadata (`downloads/.meta/<kind>-<id>.img`) and served by the app under
+  `/api/local_image`, so the detail page and the cards keep their poster without internet. Existing
+  downloads are completed on the next online start.
+
+### Added
+- **A real offline series view.** The detail page of a downloaded series lists its seasons and every
+  episode with its state — *available offline*, *downloading %*, *not downloaded* — plus a season
+  picker, an "Only offline" filter, "Download season" to queue all missing episodes at once, and
+  play/delete per episode.
+
 ## [1.5.31] — 2026-11-11
 
 ### Fixed

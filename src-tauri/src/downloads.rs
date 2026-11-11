@@ -139,7 +139,7 @@ impl Downloads {
     pub fn set_poster(&self, id: &str, poster: &str) {
         let mut items = self.items.lock().unwrap();
         if let Some(it) = items.iter_mut().find(|i| i.id == id) {
-            if it.poster.as_deref().map(|p| p.trim().is_empty()).unwrap_or(true) {
+            if it.poster.as_deref() != Some(poster) {
                 it.poster = Some(poster.to_string());
                 self.save_locked(&items);
             }
@@ -149,6 +149,24 @@ impl Downloads {
     /// Where the detail page data of an item is cached (one file per title).
     fn meta_path(&self, kind: &str, id: &str) -> PathBuf {
         self.root.join(".meta").join(format!("{kind}-{id}.json"))
+    }
+
+    fn meta_image_path(&self, kind: &str, id: &str) -> PathBuf {
+        self.root.join(".meta").join(format!("{kind}-{id}.img"))
+    }
+
+    /// The cover image stored next to the detail data - offline the remote URLs
+    /// from the provider/IMDb are not reachable.
+    pub fn read_meta_image(&self, kind: &str, id: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.meta_image_path(kind, id)).ok()
+    }
+
+    pub fn write_meta_image(&self, kind: &str, id: &str, bytes: &[u8]) {
+        let path = self.meta_image_path(kind, id);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, bytes);
     }
 
     /// Detail data for the offline detail view (plot, cast, episodes, ...).

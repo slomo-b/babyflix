@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.32
+
+- 🖼 **Detail pages look right and work offline.** Title, plot, cast, rating and poster now come from
+  IMDb (your provider often stores only the year as "rating"), and the artwork is **saved with the
+  download**, so the page is complete without internet.
+- 📺 **A real offline series view:** pick a season, see every episode with its state, filter to what is
+  already offline, or queue a whole season with one click.
+
 ## 🆕 What's new in 1.5.31
 
 - 🏷 **Correct titles and covers for every download.** Some titles appeared as "Film #1608660" or

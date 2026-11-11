@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Check,
   Download,
+  Loader2,
   Play,
   RotateCcw,
   Trash2,
@@ -15,11 +16,16 @@ import { useT } from "../lib/i18n";
 import { Select } from "../components/Select";
 import { asRating, fmtVotes, initials, initialsColor, yearOf } from "../lib/format";
 
+/** Local images are served by the app itself; everything else goes through the proxy. */
+function mediaUrl(u?: string | null): string | undefined {
+  if (!u) return undefined;
+  return u.startsWith("http://127.0.0.1") ? u : imgUrl(u);
+}
+
 /**
- * Detail page for downloaded content.
- *
- * Uses the copy of the provider metadata that was stored with the download, so it
- * works without internet - same layout as the streaming detail page.
+ * Detail page for downloaded content - built from the metadata stored with the
+ * download, so it works without internet. Series show their seasons and every
+ * episode with its state; missing episodes can be queued from here.
  */
 export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
   const t = useT();
@@ -29,6 +35,8 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
   const play = useStore((s) => s.play);
   const [seasonIdx, setSeasonIdx] = useState(0);
   const [confirm, setConfirm] = useState<string | null>(null);
+  const [onlyOffline, setOnlyOffline] = useState(false);
+  const [bulk, setBulk] = useState(false);
 
   const detailQ = useQuery({
     queryKey: ["local_detail", kind, id],
@@ -57,18 +65,20 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
   const imdb = data?.imdb;
   const seasons = data?.seasons ?? [];
   const activeSeason = seasons[Math.min(seasonIdx, Math.max(0, seasons.length - 1))];
+  const episodes = activeSeason?.episodes ?? [];
 
   const movieDownload = bySource.get(`movie:${id}`);
+  const seriesTitle = downloads.find((d) => d.series_id === id)?.title;
   // Der Anbieter liefert bei manchen Titeln gar keine Infos - dann steht dort nur
   // "Film #<id>". Fallback: der beim Download gespeicherte Name.
-  const seriesTitle = downloads.find((d) => d.series_id === id)?.title;
   const rawTitle = item?.name ?? "";
   const placeholder = !rawTitle.trim() || /^(Film|Serie) #\d+/.test(rawTitle);
   const title = placeholder
     ? movieDownload?.title ?? seriesTitle ?? (rawTitle.trim() || t("local.unknown"))
     : rawTitle;
-  const poster = imgUrl(imdb?.image ?? item?.cover ?? movieDownload?.poster);
-  const backdrop = imgUrl(detail?.backdrop ?? item?.cover ?? movieDownload?.poster);
+
+  const poster = mediaUrl(imdb?.image ?? item?.cover ?? movieDownload?.poster);
+  const backdrop = mediaUrl(detail?.backdrop ?? item?.cover ?? movieDownload?.poster);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["downloads"] });
 
@@ -87,10 +97,11 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
     });
   };
 
-  const episodes = activeSeason?.episodes ?? [];
-  const downloadedEpisodes = episodes.filter((e) => bySource.get(`series:${e.id}`)?.state === "done");
+  const stateOf = (episodeId: string) => bySource.get(`series:${episodeId}`);
+  const doneEpisodes = episodes.filter((e) => stateOf(e.id)?.state === "done");
+  const missingEpisodes = episodes.filter((e) => !stateOf(e.id));
 
-  const fixUpload = (ep: { id: string; num: number; title: string; extension: string; cover: string | null }) =>
+  const downloadEpisode = (ep: { id: string; num: number; title: string; extension: string }) =>
     api
       .download({
         kind: "series",
@@ -103,8 +114,24 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
         episode: ep.num,
         ext: ep.extension,
       })
-      .catch(() => undefined)
-      .finally(refresh);
+      .catch(() => undefined);
+
+  /** Alle fehlenden Folgen dieser Staffel in die Warteschlange legen. */
+  const downloadSeason = async () => {
+    setBulk(true);
+    try {
+      for (const ep of missingEpisodes) {
+        await downloadEpisode(ep);
+      }
+      refresh();
+    } finally {
+      setBulk(false);
+    }
+  };
+
+  const shownEpisodes = onlyOffline
+    ? episodes.filter((e) => stateOf(e.id)?.state === "done")
+    : episodes;
 
   return (
     <div className="animate-fade-in">
@@ -150,7 +177,7 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
 
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
               {(() => {
-                const year = yearOf(item?.name ?? title);
+                const year = yearOf(rawTitle.includes("(") ? rawTitle : title);
                 return year ? <span>{year}</span> : null;
               })()}
               {(() => {
@@ -167,7 +194,7 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
             </div>
 
             {detail?.plot && (
-              <p className="mt-4 line-clamp-5 max-w-3xl text-sm leading-relaxed text-[var(--muted)]">
+              <p className="mt-4 line-clamp-6 max-w-3xl text-sm leading-relaxed text-[var(--muted)]">
                 {detail.plot}
               </p>
             )}
@@ -188,11 +215,11 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
                   <span className="text-sm text-[var(--muted)]">{t("local.notDownloaded")}</span>
                 ))}
 
-              {kind === "series" && downloadedEpisodes.length > 0 && (
+              {kind === "series" && doneEpisodes.length > 0 && (
                 <button
                   className="btn btn-primary py-3 text-base"
                   onClick={() => {
-                    const d = bySource.get(`series:${downloadedEpisodes[0].id}`);
+                    const d = stateOf(doneEpisodes[0].id);
                     if (d) playLocal(d);
                   }}
                 >
@@ -233,47 +260,100 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
 
       {kind === "series" && seasons.length > 0 && (
         <div className="mt-6">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold">{t("detail.episodes")}</h2>
-            {seasons.length > 1 && (
-              <Select
-                value={String(seasonIdx)}
-                onChange={(v) => setSeasonIdx(Number(v))}
-                ariaLabel={t("detail.episodes")}
-                className="w-48"
-                options={seasons.map((s, i) => ({
-                  value: String(i),
-                  label: s.name || `${t("downloads.season", { n: s.number })}`,
-                }))}
-              />
-            )}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 className="text-lg font-bold">{t("detail.episodes")}</h2>
+              <span className="text-xs text-[var(--muted)]">
+                {t("local.offlineOf", {
+                  have: doneEpisodes.length,
+                  total: episodes.length,
+                })}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="chip"
+                data-active={onlyOffline}
+                onClick={() => setOnlyOffline((v) => !v)}
+              >
+                {t("local.onlyOffline")}
+              </button>
+              {missingEpisodes.length > 0 && (
+                <button
+                  className="btn btn-ghost py-2"
+                  onClick={() => void downloadSeason()}
+                  disabled={bulk}
+                >
+                  {bulk ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  {t("local.downloadSeason")}
+                </button>
+              )}
+              {seasons.length > 1 && (
+                <Select
+                  value={String(seasonIdx)}
+                  onChange={(v) => setSeasonIdx(Number(v))}
+                  ariaLabel={t("detail.episodes")}
+                  className="w-48"
+                  options={seasons.map((s, i) => ({
+                    value: String(i),
+                    label: s.name || `${t("downloads.season", { n: s.number })}`,
+                  }))}
+                />
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
-            {episodes.map((ep) => {
-              const d = bySource.get(`series:${ep.id}`);
+            {shownEpisodes.map((ep) => {
+              const d = stateOf(ep.id);
               const done = d?.state === "done";
               const busy = d?.state === "running" || d?.state === "queued";
               return (
                 <div
                   key={ep.id}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-3"
+                  className={`flex items-center gap-3 rounded-2xl border p-3 transition ${
+                    done
+                      ? "border-[var(--accent)]/35 bg-[var(--accent)]/[0.08]"
+                      : "border-[var(--border)] bg-white/[0.03]"
+                  }`}
                 >
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-[var(--accent-2)]">
                     {ep.num}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold">{ep.title}</div>
-                    {ep.plot && (
-                      <div className="line-clamp-1 text-xs text-[var(--muted)]">{ep.plot}</div>
-                    )}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+                      {done ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-300">
+                          <Check size={11} /> {t("downloads.state.done")}
+                        </span>
+                      ) : busy ? (
+                        <span className="text-[var(--accent-2)]">
+                          {d?.state === "queued"
+                            ? t("downloads.state.queued")
+                            : `${t("downloads.state.running")} ${
+                                d?.total ? Math.round((d.done / d.total) * 100) : 0
+                              }%`}
+                        </span>
+                      ) : d ? (
+                        <span className="text-rose-300">{t("downloads.state.stopped")}</span>
+                      ) : (
+                        <span>{t("downloads.notDownloaded")}</span>
+                      )}
+                      {done && d && (
+                        <span>{Math.round((d.total || d.done) / 1024 ** 2)} MB</span>
+                      )}
+                      {ep.plot && <span className="line-clamp-1 max-w-xl opacity-70">{ep.plot}</span>}
+                    </div>
                   </div>
 
                   {done ? (
                     <>
-                      <span className="shrink-0 text-[11px] text-[var(--muted)]">
-                        {Math.round((d!.total || d!.done) / 1024 ** 2)} MB
-                      </span>
                       <button
                         className="shrink-0 rounded-lg bg-white/10 p-2 text-white transition hover:bg-white/20"
                         title={t("downloads.play")}
@@ -290,20 +370,14 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
                       </button>
                     </>
                   ) : busy ? (
-                    <span className="shrink-0 text-[11px] text-[var(--accent-2)]">
-                      {d?.state === "queued" ? t("downloads.state.queued") : `${t("detail.downloading")} ${d?.total ? Math.round((d.done / d.total) * 100) : 0}%`}
-                    </span>
+                    <Loader2 size={16} className="shrink-0 animate-spin text-[var(--accent-2)]" />
                   ) : (
                     <button
                       className="shrink-0 rounded-lg p-2 text-[var(--muted)] transition hover:bg-white/10 hover:text-white"
-                      title={t("detail.download")}
-                      onClick={() => fixUpload(ep)}
+                      title={d ? t("downloads.resume") : t("detail.download")}
+                      onClick={() => void downloadEpisode(ep).then(refresh)}
                     >
-                      {d?.state === "error" || d?.state === "paused" || d?.state === "stopped" ? (
-                        <RotateCcw size={16} />
-                      ) : (
-                        <Download size={16} />
-                      )}
+                      {d ? <RotateCcw size={16} /> : <Download size={16} />}
                     </button>
                   )}
                 </div>
@@ -311,7 +385,7 @@ export default function LocalDetail({ kind }: { kind: "movie" | "series" }) {
             })}
           </div>
 
-          {episodes.length === 0 && (
+          {shownEpisodes.length === 0 && (
             <p className="rounded-2xl border border-[var(--border)] bg-white/[0.03] p-6 text-sm text-[var(--muted)]">
               {t("local.noEpisodes")}
             </p>

@@ -600,33 +600,86 @@ pub(crate) async fn build_detail(app: &Arc<App>, kind: &str, id: &str) -> Result
         }
     }
 
-    // enrich with keyless IMDb (rating/votes/poster/cast)
+    // enrich with keyless IMDb (rating/votes/poster/cast). Provider values are
+    // often the release year instead of a rating and its plots are short, so IMDb
+    // wins wherever it has data - the detail page is where users compare.
     let year = parse_year(md.detail.release_date.as_deref());
-    let imdb = app.imdb_enrich(&md.item.name, year, &kind).await;
+    let imdb = app
+        .imdb_enrich(&imdb_query_title(&md.item.name), year, &kind)
+        .await;
     if let Some(i) = &imdb {
-        if md.item.cover.is_none() {
-            md.item.cover = i.image.clone();
+        if let Some(img) = i.image.clone().or_else(|| md.item.cover.clone()) {
+            md.item.cover = Some(img);
         }
-        if md.detail.plot.is_none() {
-            md.detail.plot = i.plot.clone();
+        if let Some(plot) = i.plot.clone().filter(|p| !p.trim().is_empty()) {
+            md.detail.plot = Some(plot);
         }
-        if md.detail.cast.is_empty() && !i.cast.is_empty() {
+        if !i.cast.is_empty() {
             md.detail.cast = i.cast.clone();
         }
         if md.detail.director.is_none() {
             md.detail.director = i.director.clone();
         }
-        if md.detail.rating.is_none() {
-            md.detail.rating = i.rating;
+        if let Some(r) = i.rating {
+            md.detail.rating = Some(r);
+        }
+        if !i.genres.is_empty()
+            && md
+                .detail
+                .genre
+                .as_deref()
+                .map(|g| g.trim().is_empty())
+                .unwrap_or(true)
+        {
+            md.detail.genre = Some(i.genres.join(", "));
+        }
+        if md.detail.release_date.is_none() {
+            if let Some(y) = i.year {
+                md.detail.release_date = Some(y.to_string());
+            }
         }
     }
+    // The language tag is catalogue bookkeeping, not part of the title.
+    md.item.name = strip_lang_prefix(&md.item.name);
     Ok(json!({
         "item": md.item,
         "detail": md.detail,
         "seasons": md.seasons,
         "imdb": imdb,
         "incomplete": incomplete,
+        // Bumped when the payload gained fields; older stored copies are rebuilt.
+        "v": 2,
     }))
+}
+
+/// Title without the provider's language prefix and trailing year, for the IMDb
+/// lookup: "DE - Ziemlich beste Freunde (2011)" -> "Ziemlich beste Freunde".
+fn imdb_query_title(name: &str) -> String {
+    let mut t = strip_lang_prefix(name);
+    if let Some(stripped) = t.strip_suffix(')') {
+        if let Some(idx) = stripped.rfind('(') {
+            let year = &stripped[idx + 1..];
+            if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()) {
+                t = stripped[..idx].trim().to_string();
+            }
+        }
+    }
+    t
+}
+
+/// "AT| DAS ERSTE HD" -> "DAS ERSTE HD", "DE - Ein Film (2011)" -> "Ein Film (2011)".
+fn strip_lang_prefix(name: &str) -> String {
+    let t = name.trim();
+    if name_lang(t).is_none() {
+        return t.to_string();
+    }
+    if let Some((_, rest)) = t.split_once(" - ") {
+        return rest.trim().to_string();
+    }
+    if let Some((_, rest)) = t.split_once('|') {
+        return rest.trim().to_string();
+    }
+    t.to_string()
 }
 
 /// Detail for M3U-sourced items: metadata from the playlist + keyless IMDb enrichment.
@@ -1189,13 +1242,9 @@ async fn download_start(State(app): State<Arc<App>>, Json(req): Json<DownloadReq
         let entry_id = format!("{}-{}", if k == "series" { "series" } else { "movie" }, id);
         tokio::spawn(async move {
             if meta_app.downloads.read_meta(&k, &id).is_none() {
-                if let Ok(payload) = build_detail(&meta_app, &k, &id).await {
-                    if let Some(cover) = payload
-                        .get("item")
-                        .and_then(|i| i.get("cover"))
-                        .and_then(|c| c.as_str())
-                    {
-                        meta_app.downloads.set_poster(&entry_id, cover);
+                if let Ok(mut payload) = build_detail(&meta_app, &k, &id).await {
+                    if let Some(local) = cache_cover(&meta_app, &k, &id, &mut payload).await {
+                        meta_app.downloads.set_poster(&entry_id, &local);
                     }
                     meta_app.downloads.write_meta(&k, &id, &payload);
                 }
@@ -1230,6 +1279,84 @@ async fn downloads_open(State(app): State<Arc<App>>) -> ApiResult {
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Store the cover locally and point the payload at the local copy, so the detail
+/// page and the download cards still show an image without internet.
+pub(crate) async fn cache_cover(
+    app: &Arc<App>,
+    kind: &str,
+    id: &str,
+    payload: &mut Value,
+) -> Option<String> {
+    if app.downloads.read_meta_image(kind, id).is_none() {
+        let url = payload
+            .get("imdb")
+            .and_then(|i| i.get("image"))
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                payload
+                    .get("item")
+                    .and_then(|i| i.get("cover"))
+                    .and_then(|v| v.as_str())
+            })
+            .map(str::to_string)?;
+        let resp = app.client.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let bytes = resp.bytes().await.ok()?;
+        if bytes.len() < 512 || bytes.len() > 12_000_000 {
+            return None;
+        }
+        app.downloads.write_meta_image(kind, id, &bytes);
+    }
+    let local = format!(
+        "{}/api/local_image?kind={}&id={}",
+        crate::proxy::origin(),
+        kind,
+        id
+    );
+    if let Some(item) = payload.get_mut("item") {
+        item["cover"] = json!(local);
+    }
+    if let Some(imdb) = payload.get_mut("imdb") {
+        if !imdb.is_null() {
+            imdb["image"] = json!(local);
+        }
+    }
+    Some(local)
+}
+
+#[derive(Deserialize)]
+struct LocalImageQ {
+    kind: String,
+    id: String,
+}
+
+async fn local_image(
+    State(app): State<Arc<App>>,
+    Query(q): Query<LocalImageQ>,
+) -> Result<Response, ApiError> {
+    let bytes = app
+        .downloads
+        .read_meta_image(&q.kind, &q.id)
+        .ok_or(ApiError("No image.".into()))?;
+    let ct = if bytes.starts_with(&[0xFF, 0xD8]) {
+        "image/jpeg"
+    } else if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        "application/octet-stream"
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, ct)
+        .header(header::CACHE_CONTROL, "public, max-age=86400")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Body::from(bytes))
+        .map_err(|e| ApiError(e.to_string()))
+}
+
 #[derive(Deserialize)]
 struct LocalDetailQ {
     kind: String,
@@ -1246,17 +1373,20 @@ async fn local_detail(State(app): State<Arc<App>>, Query(q): Query<LocalDetailQ>
             .and_then(|n| n.as_str())
             .map(|n| n.starts_with("Film #") || n.starts_with("Serie #") || n.trim().is_empty())
             .unwrap_or(true);
-        if !placeholder {
+        let outdated = meta.get("v").and_then(|v| v.as_u64()).unwrap_or(0) < 2;
+        if !placeholder && !outdated {
             return Ok(Json(meta));
         }
-        if let Ok(payload) = build_detail(&app, &q.kind, &q.id).await {
+        if let Ok(mut payload) = build_detail(&app, &q.kind, &q.id).await {
+            cache_cover(&app, &q.kind, &q.id, &mut payload).await;
             app.downloads.write_meta(&q.kind, &q.id, &payload);
             return Ok(Json(payload));
         }
         return Ok(Json(meta));
     }
     // Not cached yet (for example an older download): build it now and keep it.
-    let payload = build_detail(&app, &q.kind, &q.id).await?;
+    let mut payload = build_detail(&app, &q.kind, &q.id).await?;
+    cache_cover(&app, &q.kind, &q.id, &mut payload).await;
     app.downloads.write_meta(&q.kind, &q.id, &payload);
     Ok(Json(payload))
 }
@@ -1289,6 +1419,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/download/remove", get(download_remove))
         .route("/api/downloads/open", post(downloads_open))
         .route("/api/local_detail", get(local_detail))
+        .route("/api/local_image", get(local_image))
         .route("/api/hls/{token}/{file}", get(hls_file))
         .route("/api/proxy", get(proxy_h))
         .route("/api/img", get(img_h))
