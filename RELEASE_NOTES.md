@@ -4,6 +4,16 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.29
+
+- 🛡 **The one-time move of your existing downloads is failure-proof.** If a folder cannot be moved,
+  BabyFlix keeps using the old location instead of losing track of the files.
+- 🧵 **Downloads are an orderly background queue:** up to three at a time, the rest waits as *Queued*
+  and starts automatically. Browsing or watching does not disturb them.
+- 🔁 **Interruptions no longer break a download.** Wi-Fi loss, sleep or a dropped connection is retried
+  with a growing pause and continues at the exact byte. After a restart, interrupted downloads resume
+  by themselves — even offline. Only the ones you stopped stay stopped.
+
 ## 🆕 What's new in 1.5.28
 
 - 📂 **Your downloads are now where you expect them:** `~/Movies/BabyFlix` (Windows/Linux:

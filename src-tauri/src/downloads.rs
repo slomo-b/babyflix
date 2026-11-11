@@ -50,10 +50,16 @@ pub struct DownloadInfo {
     pub created: u64,
 }
 
+/// How many downloads may run at the same time. More would fight over the
+/// provider's connections and the disk; the rest waits in the queue.
+const MAX_ACTIVE: usize = 3;
+
 pub struct Downloads {
     root: PathBuf,
     items: Mutex<Vec<DownloadInfo>>,
     cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Slots for active transfers; queued entries wait here.
+    slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl Downloads {
@@ -68,13 +74,32 @@ impl Downloads {
         let items: Vec<DownloadInfo> = items
             .into_iter()
             .map(|mut i| {
-                if i.state == "running" {
+                // The app was closed while these were active - they are interrupted,
+                // not paused, and get resumed automatically.
+                if i.state == "running" || i.state == "queued" {
                     i.state = "stopped".into();
                 }
                 i
             })
             .collect();
-        Downloads { root, items: Mutex::new(items), cancel: Mutex::new(HashMap::new()) }
+        Downloads {
+            root,
+            items: Mutex::new(items),
+            cancel: Mutex::new(HashMap::new()),
+            slots: Arc::new(tokio::sync::Semaphore::new(MAX_ACTIVE)),
+        }
+    }
+
+    /// Entries that should continue: interrupted runs and failures. Deliberately
+    /// paused ones are not resumed - the user stopped those.
+    pub fn pending(&self) -> Vec<DownloadInfo> {
+        self.items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|i| matches!(i.state.as_str(), "running" | "queued" | "stopped" | "error"))
+            .cloned()
+            .collect()
     }
 
     pub fn dir(&self) -> &Path {
@@ -119,10 +144,18 @@ impl Downloads {
         path.exists().then_some(path)
     }
 
+    /// User pressed stop: remember the intent so a restart does not resume it.
     pub fn stop(&self, id: &str) {
         if let Some(flag) = self.cancel.lock().unwrap().get(id) {
             flag.store(true, Ordering::Relaxed);
         }
+        let mut items = self.items.lock().unwrap();
+        if let Some(it) = items.iter_mut().find(|i| i.id == id) {
+            if !matches!(it.state.as_str(), "done") {
+                it.state = "paused".into();
+            }
+        }
+        self.save_locked(&items);
     }
 
     pub fn remove(&self, id: &str) -> Result<()> {
@@ -157,15 +190,20 @@ impl Downloads {
         mut info: DownloadInfo,
     ) -> Result<DownloadInfo> {
         if let Some(existing) = self.get(&info.id) {
-            if existing.state == "running" || existing.state == "done" {
+            if matches!(existing.state.as_str(), "running" | "queued" | "done") {
                 return Ok(existing);
             }
         }
         let dir = self.root.join(&info.id);
         std::fs::create_dir_all(&dir)?;
 
-        info.state = "running".into();
-        info.done = 0;
+        // Keep the progress of an interrupted run; the file is resumed, not restarted.
+        let partial = dir.join(format!("source.{}.part", info.ext));
+        let already = std::fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
+        if already > 0 && info.done == 0 {
+            info.done = already;
+        }
+        info.state = "queued".into();
         info.error = None;
         info.file = None;
         if info.created == 0 {
@@ -183,7 +221,25 @@ impl Downloads {
         let part = dir.join(format!("source.{ext}.part"));
         let finished = dir.join(format!("source.{ext}"));
 
+        let slots = self.slots.clone();
         tokio::spawn(async move {
+            // Wait for a free slot: everything stays queued and keeps its progress
+            // until a transfer finishes.
+            let slot = match slots.acquire().await {
+                Ok(permit) => permit,
+                Err(_) => return,
+            };
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            {
+                let mut items = me.items.lock().unwrap();
+                if let Some(it) = items.iter_mut().find(|i| i.id == id) {
+                    it.state = "running".into();
+                }
+                me.save_locked(&items);
+            }
+
             // The provider throttles per connection (measured: 1.6 MB/s on one,
             // 10.3 MB/s on four), so large files are fetched in parallel ranges.
             // If that is unsupported or fails, one stream takes over.
@@ -241,7 +297,9 @@ impl Downloads {
                             it.error = None;
                         }
                         Err(e) => {
-                            it.state = if cancelled { "stopped".into() } else { "error".into() };
+                            // Cancelled by the user: stay paused, so a restart does not
+                            // resume it behind their back.
+                            it.state = if cancelled { "paused".into() } else { "error".into() };
                             if !cancelled {
                                 it.error = Some(format!(
                                     "{e} - erneut starten setzt an dieser Stelle fort"
@@ -256,6 +314,7 @@ impl Downloads {
                 eprintln!("[babyflix] download could not be finalized");
             }
             me.cancel.lock().unwrap().remove(&id);
+            drop(slot);
         });
 
         Ok(entry)
@@ -350,9 +409,12 @@ async fn range_to_file(
     id: &str,
 ) -> Result<u64> {
     let mut written: u64 = 0;
-    let mut attempts = 0u32;
-    let mut idle = 0u32;
+    let mut backoff = 1u64;
+    let mut no_progress = 0u32;
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("abgebrochen");
+        }
         let from = start + written;
         if from > end {
             return Ok(written);
@@ -366,14 +428,19 @@ async fn range_to_file(
             .await;
         let mut resp = match resp {
             Ok(r) if r.status() == reqwest::StatusCode::PARTIAL_CONTENT => r,
-            Ok(r) => bail!("Bereich {from}-{end} abgelehnt (HTTP {})", r.status()),
-            Err(e) => {
-                attempts += 1;
-                idle += 1;
-                if idle > 5 || attempts > 40 {
-                    bail!("Bereich {}: {e}", from);
-                }
-                tokio::time::sleep(Duration::from_millis(700)).await;
+            Ok(r) if r.status().is_client_error()
+                && r.status() != reqwest::StatusCode::REQUEST_TIMEOUT =>
+            {
+                bail!("Bereich {from}-{end} abgelehnt (HTTP {})", r.status())
+            }
+            Ok(_) => {
+                tokio::time::sleep(Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(60);
+                continue;
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(60);
                 continue;
             }
         };
@@ -403,18 +470,19 @@ async fn range_to_file(
         file.flush().await?;
         drop(file);
         if written > before {
-            idle = 0;
+            no_progress = 0;
+            backoff = 1;
         } else {
-            idle += 1;
+            no_progress += 1;
         }
         if failed.is_none() && start + written > end {
             return Ok(written);
         }
-        attempts += 1;
-        if idle > 5 || attempts > 40 {
-            return Err(failed.unwrap_or_else(|| anyhow!("Bereich brach wiederholt ab")));
+        if no_progress > 30 {
+            return Err(failed.unwrap_or_else(|| anyhow!("Bereich ohne Fortschritt")));
         }
-        tokio::time::sleep(Duration::from_millis(700)).await;
+        tokio::time::sleep(Duration::from_secs(backoff)).await;
+        backoff = (backoff * 2).min(60);
     }
 }
 
@@ -448,10 +516,16 @@ async fn stream_to_file(
         return Ok(done);
     }
 
-    let mut attempts = 0u32;
-    let mut idle = 0u32;
+    // Interruptions are normal: a sleeping Mac, a Wi-Fi change, a provider hiccup.
+    // Retry with a growing pause and only give up when a run makes no progress at
+    // all for a long time. A failed 4xx is final (expired link, wrong account).
+    let mut backoff = 1u64;
+    let mut no_progress = 0u32;
     let mut last_save = Instant::now();
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(anyhow!("abgebrochen"));
+        }
         let before = done;
         let mut request = client
             .get(url)
@@ -462,22 +536,29 @@ async fn stream_to_file(
             request = request.header(reqwest::header::RANGE, format!("bytes={done}-"));
         }
         let resp = match request.send().await {
-            Ok(r) if r.status().is_success() => r,
-            Ok(r) if done > 0 && r.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE => {
-                return Ok(done)
-            }
-            Ok(r) => return Err(anyhow!("Anbieter antwortet mit HTTP {}", r.status())),
-            Err(e) => {
-                attempts += 1;
-                idle += 1;
-                if idle > 5 || attempts > 80 {
-                    return Err(anyhow!("Verbindung fehlgeschlagen: {e}"));
-                }
-                tokio::time::sleep(Duration::from_millis(700)).await;
+            Ok(r) => r,
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(60);
                 continue;
             }
         };
-        if done > 0 && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        let status = resp.status();
+        if done > 0 && status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            return Ok(done);
+        }
+        if status.is_client_error()
+            && status != reqwest::StatusCode::REQUEST_TIMEOUT
+            && status != reqwest::StatusCode::TOO_MANY_REQUESTS
+        {
+            return Err(anyhow!("Anbieter antwortet mit HTTP {status}"));
+        }
+        if !status.is_success() {
+            tokio::time::sleep(Duration::from_secs(backoff)).await;
+            backoff = (backoff * 2).min(60);
+            continue;
+        }
+        if done > 0 && status != reqwest::StatusCode::PARTIAL_CONTENT {
             // The provider ignores ranges: start over instead of appending twice.
             let _ = std::fs::remove_file(part);
             done = 0;
@@ -524,19 +605,20 @@ async fn stream_to_file(
         drop(file);
 
         if done > before {
-            idle = 0;
+            no_progress = 0;
+            backoff = 1;
         } else {
-            idle += 1;
+            no_progress += 1;
         }
         let finished = failed.is_none() && (total == 0 || done >= total);
         if finished {
             return Ok(done);
         }
-        attempts += 1;
-        if idle > 5 || attempts > 80 {
-            return Err(failed.unwrap_or_else(|| anyhow!("Verbindung brach wiederholt ab")));
+        if no_progress > 30 {
+            return Err(failed.unwrap_or_else(|| anyhow!("kein Fortschritt mehr")));
         }
-        tokio::time::sleep(Duration::from_millis(700)).await;
+        tokio::time::sleep(Duration::from_secs(backoff)).await;
+        backoff = (backoff * 2).min(60);
     }
 }
 
@@ -562,22 +644,52 @@ pub fn default_root(app_dir: &Path) -> PathBuf {
     app_dir.join("downloads")
 }
 
-/// Move a downloads folder from an older location, entry by entry.
-pub fn migrate(old: &Path, new: &Path) {
+/// Move a downloads folder from an older location.
+///
+/// Returns `true` when everything is at the new place (or there was nothing to
+/// move). Folders are moved first and `index.json` last, so a failure never leaves
+/// an index pointing at files that stayed behind - the caller then keeps using the
+/// old folder instead.
+pub fn migrate(old: &Path, new: &Path) -> bool {
     if old == new || !old.exists() {
-        return;
+        return true;
     }
     if std::fs::create_dir_all(new).is_err() {
-        return;
+        return false;
     }
-    let Ok(entries) = std::fs::read_dir(old) else { return };
+    let Ok(entries) = std::fs::read_dir(old) else { return true };
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
     for entry in entries.flatten() {
-        let target = new.join(entry.file_name());
-        if !target.exists() {
-            let _ = std::fs::rename(entry.path(), target);
+        if entry.path().is_dir() {
+            dirs.push(entry.path());
+        } else {
+            files.push(entry.path());
+        }
+    }
+    for path in dirs {
+        let Some(name) = path.file_name() else { continue };
+        let target = new.join(name);
+        if target.exists() {
+            continue;
+        }
+        if std::fs::rename(&path, &target).is_err() {
+            // Different volume or no permission: leave everything where it is.
+            return false;
+        }
+    }
+    for path in files {
+        let Some(name) = path.file_name() else { continue };
+        let target = new.join(name);
+        if target.exists() {
+            continue;
+        }
+        if std::fs::rename(&path, &target).is_err() {
+            return false;
         }
     }
     let _ = std::fs::remove_dir(old);
+    true
 }
 
 /// Open a folder in the platform's file manager.
@@ -915,6 +1027,60 @@ mod tests {
         assert_eq!(done.state, "done", "download failed: {:?}", done.error);
         let file = dl.local_file("movie-99").expect("local file");
         assert_eq!(std::fs::read(&file).unwrap(), body);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only interrupted runs are resumed automatically - a deliberate stop is not.
+    #[test]
+    fn only_interrupted_downloads_are_pending() {
+        let dir = std::env::temp_dir().join(format!("babyflix-dl-pending-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let dl = Downloads::new(dir.clone());
+
+        let mut running = info("movie-a");
+        running.state = "running".into();
+        let mut stopped = info("movie-b");
+        stopped.state = "stopped".into();
+        let mut queued = info("movie-c");
+        queued.state = "queued".into();
+        let mut paused = info("movie-d");
+        paused.state = "paused".into();
+        let done = info("movie-e");
+        for e in [running, stopped, queued, paused, done] {
+            dl.upsert(e);
+        }
+
+        let mut ids: Vec<String> = dl.pending().into_iter().map(|i| i.id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["movie-a", "movie-b", "movie-c"]);
+
+        // Pressing stop marks the entry as paused, so a restart leaves it alone.
+        dl.stop("movie-a");
+        assert_eq!(dl.get("movie-a").unwrap().state, "paused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A running entry from before the restart is interrupted (and resumable);
+    /// a paused one keeps its state and is left alone.
+    #[test]
+    fn restart_marks_interrupted_and_keeps_paused() {
+        let dir = std::env::temp_dir().join(format!("babyflix-dl-restart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let dl = Downloads::new(dir.clone());
+            let mut running = info("movie-r");
+            running.state = "running".into();
+            let mut paused = info("movie-p");
+            paused.state = "paused".into();
+            dl.upsert(running);
+            dl.upsert(paused);
+            dl.save();
+        }
+        let dl = Downloads::new(dir.clone());
+        assert_eq!(dl.get("movie-r").unwrap().state, "stopped");
+        assert_eq!(dl.get("movie-p").unwrap().state, "paused");
+        let ids: Vec<String> = dl.pending().into_iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec!["movie-r"], "only the interrupted one resumes");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

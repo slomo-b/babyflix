@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.29] — 2026-11-11
+
+### Fixed
+- **Safer move of the existing downloads.** 1.5.28 moves the downloads out of the app-data folder
+  into the visible one. That move now transfers folders first and `index.json` last, and aborts
+  without touching the index if anything fails (different volume, missing permission) — the app then
+  keeps using the old folder. An index can never point at files that stayed behind.
+
+### Changed
+- **Downloads run as an orderly background queue.** At most three transfers at a time; the rest wait
+  as *Queued* and start by themselves. Browsing or watching does not affect them.
+- **An interruption no longer ends a download.** A dropped connection, a Wi-Fi change or the Mac
+  going to sleep is retried with a growing pause (1 s up to 60 s) and continues at the exact byte.
+  Only a 4xx answer (expired link, wrong account) stops it, and a run gives up only after a long
+  stretch without any progress.
+- **Interrupted downloads resume on their own after a restart.** Entries that were active when the app
+  closed are marked *Interrupted* and continue after login — with the cached session, so this also
+  works without a network. Only a download you stopped yourself remains paused.
+
 ## [1.5.28] — 2026-11-11
 
 ### Fixed

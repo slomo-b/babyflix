@@ -62,8 +62,11 @@ impl App {
         let remux = crate::remux::Remux::new(dir.join("hls"));
         // A folder the user can actually find in Finder/Explorer - the previous
         // location inside Application Support is invisible by default.
-        let dl_root = crate::downloads::default_root(&dir);
-        crate::downloads::migrate(&dir.join("downloads"), &dl_root);
+        let wanted = crate::downloads::default_root(&dir);
+        let legacy = dir.join("downloads");
+        // If the move fails (other volume, permissions) stay on the old folder so no
+        // index ever points at missing files.
+        let dl_root = if crate::downloads::migrate(&legacy, &wanted) { wanted } else { legacy };
         let downloads = std::sync::Arc::new(crate::downloads::Downloads::new(dl_root));
         // Before `dir` moves into the struct.
         let imdb_cache = load_imdb_cache(&dir);
@@ -352,6 +355,25 @@ impl App {
                 eprintln!("[babyflix] imdb ratings dataset loaded");
             }
         });
+    }
+
+    /// Continue downloads that were interrupted - app quit, network loss, error.
+    ///
+    /// The source URL is not stored (it contains provider credentials), so it is
+    /// rebuilt from the session; the partial files are resumed, not restarted.
+    pub async fn resume_downloads(self: &Arc<Self>) {
+        let Some(session) = self.session().await else { return };
+        let pending = self.downloads.pending();
+        if pending.is_empty() {
+            return;
+        }
+        eprintln!("[babyflix] resuming {} download(s)", pending.len());
+        for d in pending {
+            let url = xtream::stream_url(&session, &d.kind, &d.source_id, &d.ext);
+            if let Err(e) = self.downloads.start(self.client.clone(), url, d.clone()) {
+                eprintln!("[babyflix] could not resume {}: {e}", d.id);
+            }
+        }
     }
 
     /// Enrich a title with keyless IMDb data (cached, in-flight-safe enough for desktop).

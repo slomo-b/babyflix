@@ -387,8 +387,8 @@ export interface DownloadInfo {
   ext: string;
   total: number;
   done: number;
-  /** running | done | stopped | error */
-  state: "running" | "done" | "stopped" | "error";
+  /** running | queued | done | paused | stopped | error */
+  state: "running" | "queued" | "done" | "paused" | "stopped" | "error";
   error?: string | null;
   file?: string | null;
   created: number;

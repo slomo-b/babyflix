@@ -62,6 +62,9 @@ pub fn run() {
                 if let Err(e) = boot_state.autologin().await {
                     eprintln!("[babyflix] autologin skipped: {e}");
                 }
+                // Interrupted downloads continue on their own, even without network
+                // (they keep retrying until it is back).
+                boot_state.resume_downloads().await;
                 boot_state.ensure_ratings();
             });
 

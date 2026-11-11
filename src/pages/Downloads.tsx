@@ -69,11 +69,15 @@ export default function Downloads() {
     queryKey: ["downloads"],
     queryFn: api.downloads,
     refetchInterval: (query) =>
-      query.state.data?.items.some((i) => i.state === "running") ? 1000 : 15000,
+      query.state.data?.items.some(
+        (i) => i.state === "running" || i.state === "queued"
+      )
+        ? 1000
+        : 15000,
   });
 
   const all = data?.items ?? [];
-  const running = all.filter((i) => i.state === "running");
+  const running = all.filter((i) => i.state === "running" || i.state === "queued");
   const used = all.reduce((n, i) => n + (i.state === "done" ? i.total || i.done : 0), 0);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["downloads"] });
@@ -134,8 +138,11 @@ export default function Downloads() {
     );
   }, [all, filter, sort]);
 
-  const runningItems = filtered.filter((i) => i.state === "running");
-  const failedItems = filtered.filter((i) => i.state === "stopped" || i.state === "error");
+  // Queued entries belong to the active section: they wait for a free slot.
+  const runningItems = filtered.filter((i) => i.state === "running" || i.state === "queued");
+  const failedItems = filtered.filter(
+    (i) => i.state === "stopped" || i.state === "error" || i.state === "paused"
+  );
   const doneItems = filtered.filter((i) => i.state === "done");
   const doneMovies = doneItems.filter((i) => i.kind === "movie");
 
@@ -638,7 +645,7 @@ function DownloadCard({
 }) {
   const t = useT();
   const p = pct(d);
-  const failed = d.state === "stopped" || d.state === "error";
+  const failed = d.state === "stopped" || d.state === "error" || d.state === "paused";
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.03] transition hover:border-[var(--accent)]/40 hover:bg-white/[0.05]">
       <button
@@ -664,16 +671,20 @@ function DownloadCard({
           className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide backdrop-blur ${
             d.state === "done"
               ? "bg-emerald-500/85 text-emerald-50"
-              : d.state === "running"
+              : d.state === "running" || d.state === "queued"
                 ? "bg-[var(--accent)]/85 text-white"
                 : "bg-black/70 text-rose-200"
           }`}
         >
           {d.state === "running"
             ? `${p}%`
-            : d.state === "done"
-              ? t("downloads.state.done")
-              : t("downloads.state.error")}
+            : d.state === "queued"
+              ? t("downloads.state.queued")
+              : d.state === "done"
+                ? t("downloads.state.done")
+                : d.state === "paused"
+                  ? t("downloads.state.paused")
+                  : t("downloads.state.stopped")}
         </span>
 
         {d.state === "done" && (
