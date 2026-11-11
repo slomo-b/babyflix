@@ -540,6 +540,46 @@ async fn stream_to_file(
     }
 }
 
+/// Where downloads live.
+///
+/// A visible folder (`~/Movies/BabyFlix` on macOS, `~/Videos/BabyFlix` elsewhere)
+/// instead of the app-data directory, which Finder hides by default and which made
+/// the files impossible to find.
+pub fn default_root(app_dir: &Path) -> PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok();
+    if let Some(home) = home {
+        #[cfg(target_os = "macos")]
+        let sub = "Movies";
+        #[cfg(not(target_os = "macos"))]
+        let sub = "Videos";
+        let dir = PathBuf::from(home).join(sub).join("BabyFlix");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            return dir;
+        }
+    }
+    app_dir.join("downloads")
+}
+
+/// Move a downloads folder from an older location, entry by entry.
+pub fn migrate(old: &Path, new: &Path) {
+    if old == new || !old.exists() {
+        return;
+    }
+    if std::fs::create_dir_all(new).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(old) else { return };
+    for entry in entries.flatten() {
+        let target = new.join(entry.file_name());
+        if !target.exists() {
+            let _ = std::fs::rename(entry.path(), target);
+        }
+    }
+    let _ = std::fs::remove_dir(old);
+}
+
 /// Open a folder in the platform's file manager.
 pub fn open_folder(path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]

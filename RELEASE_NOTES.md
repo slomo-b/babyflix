@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.28
+
+- 📂 **Your downloads are now where you expect them:** `~/Movies/BabyFlix` (Windows/Linux:
+  `~/Videos/BabyFlix`). Everything already downloaded is moved there automatically — nothing is
+  fetched again. The folder is shown on the Downloads page, and "Show in Finder" opens it.
+- ✈️ **BabyFlix works offline now.** The last successful login is remembered, so the app opens with
+  your cached catalogues without internet — and downloaded films and episodes play as usual.
+
 ## 🆕 What's new in 1.5.27
 
 - 📺 **Series downloads, grouped.** Instead of one card per episode you now see **one card per series**

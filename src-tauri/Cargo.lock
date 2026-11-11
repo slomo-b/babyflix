@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "babyflix"
-version = "1.5.27"
+version = "1.5.28"
 dependencies = [
  "anyhow",
  "axum",

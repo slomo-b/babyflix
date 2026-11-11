@@ -25,7 +25,7 @@ pub struct Credentials {
     pub password: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     pub creds: Credentials,
     pub user_info: Value,

@@ -29,6 +29,10 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let state = state::App::new(dir);
 
+            // Offline start: make the cached session available before the UI sends its
+            // first /api/session request, otherwise the login screen flashes up.
+            tauri::async_runtime::block_on(state.restore_cached_session());
+
             // Start the local HTTP API (streaming proxy + catalog + metadata).
             let api_state = state.clone();
             tauri::async_runtime::spawn(async move {
@@ -53,6 +57,8 @@ pub fn run() {
             // Restore session + pre-load keyless IMDb ratings in the background.
             let boot_state = state.clone();
             tauri::async_runtime::spawn(async move {
+                // Try the provider; the cached session (already restored above) stays
+                // in place when there is no network.
                 if let Err(e) = boot_state.autologin().await {
                     eprintln!("[babyflix] autologin skipped: {e}");
                 }

@@ -206,6 +206,15 @@ export default function Downloads() {
         </button>
       </div>
 
+      {data?.dir && (
+        <p
+          className="mt-2 select-all truncate text-xs text-[var(--muted)]"
+          title={data.dir}
+        >
+          {t("downloads.folder")}: {data.dir}
+        </p>
+      )}
+
       {all.length === 0 ? (
         <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-[var(--border)] bg-white/[0.03] p-12 text-center text-sm text-[var(--muted)]">
           <Download size={30} className="text-[var(--muted)]" />

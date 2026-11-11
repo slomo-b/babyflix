@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.5.28] — 2026-11-11
+
+### Fixed
+- **The downloads could not be found on the Mac.** They lived in
+  `~/Library/Application Support/…`, a folder Finder hides by default. They now go to a normal,
+  visible folder:
+
+  | platform | folder |
+  |---|---|
+  | macOS | `~/Movies/BabyFlix` |
+  | Windows / Linux | `~/Videos/BabyFlix` |
+
+  Existing downloads are moved there automatically on the next start — entry by entry on the same
+  volume, so the current 41 GB do not have to be fetched again. The Downloads page shows the folder
+  path under the header and "Show in Finder" opens it.
+
+- **The app could not be used offline.** Every start performed a provider login; without internet the
+  session stayed empty and the UI was stuck on the login screen — although catalogues and downloads
+  were on disk. The last successful session is cached (`session.json`) and restored **before** the UI
+  sends its first request; the provider login then runs in the background and replaces it when it
+  succeeds. Offline the app opens with the cached catalogues, and downloaded films and episodes play.
+
 ## [1.5.27] — 2026-11-10
 
 ### Added

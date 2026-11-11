@@ -60,7 +60,11 @@ impl App {
             .expect("http client");
         let _ = std::fs::create_dir_all(&dir);
         let remux = crate::remux::Remux::new(dir.join("hls"));
-        let downloads = std::sync::Arc::new(crate::downloads::Downloads::new(dir.join("downloads")));
+        // A folder the user can actually find in Finder/Explorer - the previous
+        // location inside Application Support is invisible by default.
+        let dl_root = crate::downloads::default_root(&dir);
+        crate::downloads::migrate(&dir.join("downloads"), &dl_root);
+        let downloads = std::sync::Arc::new(crate::downloads::Downloads::new(dl_root));
         // Before `dir` moves into the struct.
         let imdb_cache = load_imdb_cache(&dir);
         Arc::new(App {
@@ -98,7 +102,30 @@ impl App {
     }
 
     pub async fn set_session(&self, session: Session) {
+        // Cached so the app can open without a network: offline the provider login
+        // always fails and the UI would be stuck on the login screen.
+        if let Ok(text) = serde_json::to_string(&session) {
+            let _ = std::fs::write(self.dir.join("session.json"), text);
+        }
         *self.session.write().await = Some(session);
+    }
+
+    /// Use the last known session immediately (offline start). A background
+    /// `autologin` replaces it when the provider is reachable.
+    pub async fn restore_cached_session(&self) {
+        if self.is_logged_in().await {
+            return;
+        }
+        let Ok(text) = std::fs::read_to_string(self.dir.join("session.json")) else {
+            return;
+        };
+        match serde_json::from_str::<Session>(&text) {
+            Ok(session) => {
+                eprintln!("[babyflix] restored cached session ({})", session.source);
+                *self.session.write().await = Some(session);
+            }
+            Err(e) => eprintln!("[babyflix] cached session unreadable: {e}"),
+        }
     }
 
     pub async fn session(&self) -> Option<Session> {
