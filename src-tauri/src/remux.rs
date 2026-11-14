@@ -67,6 +67,8 @@ pub struct Remux {
     /// list, once inside `start`). On a real film that was 6.7 s + 5.1 s before
     /// anything played; a hit makes the second one free.
     probe_cache: Mutex<HashMap<String, (Instant, Value)>>,
+    /// Lazily detected hardware H.264 encoder.
+    videotoolbox: Mutex<Option<bool>>,
 }
 
 /// HTTP-only input options must not be passed for a local file - FFmpeg rejects
@@ -109,11 +111,21 @@ pub(crate) fn hidden(cmd: &mut Command) {
 /// e.g. AC-3/E-AC-3 can be copied on both macOS and Windows.
 pub(crate) fn copy_actions(
     vcodec: &str,
+    profile: Option<&str>,
+    pix_fmt: Option<&str>,
     acodec: Option<&str>,
     caps: &DecodeCaps,
 ) -> (bool, bool) {
-    let video = caps.video.contains(codec_key(vcodec));
-    let audio = acodec.is_some_and(|a| caps.audio.contains(codec_key(a)));
+    // 10-bit video (HEVC Main 10, H.264 High 10) is offered by `isTypeSupported`
+    // but does not render reliably in WebKit's MSE - it shows a black picture
+    // while the audio runs. Always re-encode those to 8-bit H.264.
+    let ten_bit = profile.map(|p| p.contains("10") || p.contains("12")).unwrap_or(false)
+        || pix_fmt.map(|p| p.contains("10") || p.contains("12")).unwrap_or(false);
+    let video = caps.video.contains(codec_key(vcodec)) && !ten_bit;
+    // Audio goes back through hls.js in the remux playlist; it can demux some
+    // codecs but the platform does not decode them (AC-3 in MSE is silent).
+    let audio = acodec
+        .is_some_and(|a| caps.audio.contains(codec_key(a)) && hls_js_compatible_audio(Some(a)));
     (video, audio)
 }
 
@@ -390,6 +402,8 @@ fn streams_from(v: &Value) -> Value {
                 "codec": s.get("codec_name").and_then(|x| x.as_str()),
                 "lang": s.get("tags").and_then(|t| t.get("language")).and_then(|x| x.as_str()),
                 "title": s.get("tags").and_then(|t| t.get("title")).and_then(|x| x.as_str()),
+                "profile": s.get("profile").and_then(|x| x.as_str()),
+                "pix_fmt": s.get("pix_fmt").and_then(|x| x.as_str()),
                 "channels": s.get("channels").and_then(|x| x.as_i64()),
                 "width": s.get("width").and_then(|x| x.as_i64()),
                 "height": s.get("height").and_then(|x| x.as_i64()),
@@ -494,6 +508,7 @@ impl Remux {
             keys: Mutex::new(HashMap::new()),
             last_decision: RwLock::new(None),
             probe_cache: Mutex::new(HashMap::new()),
+            videotoolbox: Mutex::new(None),
         }
     }
 
@@ -586,6 +601,23 @@ impl Remux {
                 None => std::thread::sleep(Duration::from_millis(50)),
             }
         }
+    }
+
+    fn has_videotoolbox(&self) -> bool {
+        if let Some(v) = *self.videotoolbox.lock().unwrap() {
+            return v;
+        }
+        let ok = match self.ffmpeg_bin() {
+            Some(ff) => std::process::Command::new(ff)
+                .arg("-hide_banner")
+                .arg("-encoders")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains("h264_videotoolbox"))
+                .unwrap_or(false),
+            None => false,
+        };
+        *self.videotoolbox.lock().unwrap() = Some(ok);
+        ok
     }
 
     fn probe_json(&self, url: &str, live: bool) -> Option<Value> {
@@ -736,14 +768,27 @@ impl Remux {
         // What FFmpeg will be told to do. Recorded for diagnostics: without a test
         // provider this is the only way to see whether a stream was copied or
         // re-encoded - and which codec forced the re-encode.
-        let (video_copy, mut audio_copy) = copy_actions(&vcodec, acodec.as_deref(), caps);
-        // Live goes back through hls.js, so only codecs it can demux are copied.
-        if live && audio_copy && !hls_js_compatible_audio(acodec.as_deref()) {
-            audio_copy = false;
-        }
+        let vprofile = streams["video"]
+            .get(0)
+            .and_then(|v| v.get("profile"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let vpix = streams["video"]
+            .get(0)
+            .and_then(|v| v.get("pix_fmt"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let (video_copy, audio_copy) = copy_actions(
+            &vcodec,
+            vprofile.as_deref(),
+            vpix.as_deref(),
+            acodec.as_deref(),
+            caps,
+        );
         let decision = json!({
             "key": key,
             "video_codec": vcodec,
+            "video_profile": vprofile,
             "video": if video_copy { "copy" } else { "transcode" },
             "audio_codec": acodec,
             "audio": if audio_copy { "copy" } else { "transcode" },
@@ -797,6 +842,21 @@ impl Remux {
         }
         if video_copy {
             cmd.arg("-c:v").arg("copy");
+        } else if self.has_videotoolbox() {
+            // Hardware H.264: 4K 10-bit sources are otherwise far slower than
+            // realtime, which would make playback stall constantly.
+            cmd.args([
+                "-c:v",
+                "h264_videotoolbox",
+                "-b:v",
+                "12M",
+                "-maxrate",
+                "16M",
+                "-bufsize",
+                "24M",
+                "-pix_fmt",
+                "yuv420p",
+            ]);
         } else {
             cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]);
         }
@@ -999,13 +1059,13 @@ mod tests {
     #[test]
     fn without_a_probe_only_h264_and_aac_mp3_are_copied() {
         let caps = DecodeCaps::conservative();
-        assert_eq!(copy_actions("h264", Some("aac"), &caps), (true, true));
-        assert_eq!(copy_actions("h264", Some("mp3"), &caps), (true, true));
-        assert_eq!(copy_actions("h264", Some("ac3"), &caps), (true, false));
-        assert_eq!(copy_actions("hevc", Some("aac"), &caps), (false, true));
-        assert_eq!(copy_actions("hevc", Some("ac3"), &caps), (false, false));
+        assert_eq!(copy_actions("h264", None, None, Some("aac"), &caps), (true, true));
+        assert_eq!(copy_actions("h264", None, None, Some("mp3"), &caps), (true, true));
+        assert_eq!(copy_actions("h264", None, None, Some("ac3"), &caps), (true, false));
+        assert_eq!(copy_actions("hevc", None, None, Some("aac"), &caps), (false, true));
+        assert_eq!(copy_actions("hevc", None, None, Some("ac3"), &caps), (false, false));
         // No audio stream at all: nothing to copy.
-        assert_eq!(copy_actions("h264", None, &caps), (true, false));
+        assert_eq!(copy_actions("h264", None, None, None, &caps), (true, false));
     }
 
     /// The probe is what unlocks copying AC-3/E-AC-3 and HEVC.
@@ -1016,11 +1076,15 @@ mod tests {
             "audio": { "aac": { "mse": true }, "ac3": { "mse": true }, "dts": { "mse": false } }
         }))
         .expect("report is usable");
-        assert_eq!(copy_actions("hevc", Some("ac3"), &caps), (true, true));
-        assert_eq!(copy_actions("av1", Some("aac"), &caps), (false, true));
-        assert_eq!(copy_actions("h264", Some("dts"), &caps), (true, false));
+        // Video: the probe unlocks HEVC.
+        assert_eq!(copy_actions("hevc", None, None, Some("aac"), &caps), (true, true));
+        assert_eq!(copy_actions("av1", None, None, Some("aac"), &caps), (false, true));
+        // Audio: AC-3/E-AC-3/DTS are never copied, even when the probe claims they
+        // can be decoded - in MSE the picture plays without sound.
+        assert_eq!(copy_actions("hevc", None, None, Some("ac3"), &caps), (true, false));
+        assert_eq!(copy_actions("h264", None, None, Some("dts"), &caps), (true, false));
         // Alias: FFmpeg says h265 where the probe says hevc.
-        assert_eq!(copy_actions("h265", Some("eac3"), &caps), (true, false));
+        assert_eq!(copy_actions("h265", None, None, Some("eac3"), &caps), (true, false));
     }
 
     /// The remux picks the audio track itself, so the UI no longer has to probe the
@@ -1068,14 +1132,39 @@ mod tests {
         assert!(!hls_js_compatible_audio(Some("ac3")));
         assert!(!hls_js_compatible_audio(None));
 
-        // With a full probe the policy would copy AC-3/E-AC-3 - for live that is
-        // overridden, so the frontend can actually play it.
+        // Even with a full probe, AC-3/E-AC-3 is never copied: the platform reports
+        // MSE support but plays no sound.
         let caps = DecodeCaps::from_report(&json!({
             "video": { "h264": { "mse": true } },
             "audio": { "aac": { "mse": true }, "ac3": { "mse": true }, "eac3": { "mse": true } }
         }))
         .expect("report is usable");
-        assert_eq!(copy_actions("h264", Some("eac3"), &caps), (true, true));
+        assert_eq!(
+            copy_actions("h264", None, None, Some("eac3"), &caps),
+            (true, false)
+        );
         assert!(!hls_js_compatible_audio(Some("eac3")));
+    }
+
+    /// 10-bit video is reported as supported but renders black in WebKit's MSE.
+    #[test]
+    fn ten_bit_video_is_transcoded() {
+        let caps = DecodeCaps::from_report(&json!({
+            "video": { "hevc": { "mse": true }, "h264": { "mse": true } },
+            "audio": { "aac": { "mse": true } }
+        }))
+        .expect("report is usable");
+        assert_eq!(
+            copy_actions("hevc", Some("Main 10"), Some("yuv420p10le"), Some("aac"), &caps),
+            (false, true)
+        );
+        assert_eq!(
+            copy_actions("hevc", Some("Main"), Some("yuv420p"), Some("aac"), &caps),
+            (true, true)
+        );
+        assert_eq!(
+            copy_actions("h264", Some("High 10"), Some("yuv420p10le"), Some("aac"), &caps),
+            (false, true)
+        );
     }
 }

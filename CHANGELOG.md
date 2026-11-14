@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.33] — 2026-11-14
+
+### Fixed
+- **Downloaded films played without sound.** Their audio is AC-3, and the remux copied it into the
+  MPEG-TS playlist. The platform reports MSE support for AC-3 but plays no sound. AC-3, E-AC-3, DTS
+  and TrueHD are now always converted to AAC — for downloads and live channels alike.
+
+- **Some films showed a black picture.** Those are 10-bit files (HEVC Main 10, 4K).
+  `isTypeSupported` reports them as playable, but WebKit's MSE does not render them. 10-bit video is
+  now re-encoded to 8-bit H.264 using the hardware encoder (`h264_videotoolbox`), so even 4K sources
+  stay faster than realtime.
+
+### Notes
+- All **29 downloaded files were checked**: none is truncated or corrupt (every file matches its
+  expected size). 11 carry AC-3 audio and 4 are 10-bit — exactly the two groups that misbehaved.
+- Nothing has to be downloaded again; playback prepares the existing file with the new rules.
+
 ## [1.5.32] — 2026-11-11
 
 ### Changed

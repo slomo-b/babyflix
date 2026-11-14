@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.33
+
+- 🔊 **Sound for every download.** Films with AC-3 audio played mute — the format was passed through
+  and the player cannot decode it. Those tracks are converted to AAC now.
+- 🖼 **No more black pictures.** 4K films in 10-bit (HEVC Main 10) were reported as playable but
+  rendered nothing. They are converted to 8-bit H.264 with the hardware encoder, so they stay smooth.
+- 🔍 **All 29 of your downloads were checked:** none is incomplete or broken — both problems were a
+  conversion issue. No re-download needed.
+
 ## 🆕 What's new in 1.5.32
 
 - 🖼 **Detail pages look right and work offline.** Title, plot, cast, rating and poster now come from
