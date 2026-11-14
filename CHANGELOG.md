@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.34] — 2026-11-14
+
+### Fixed
+- **Films that never started playing (spinner at 00:00).** The actual cause is **multichannel
+  audio**: 15 of the 29 downloads carry 6 or 8 channels, and copying 7.1 AAC into the stream makes
+  WebKit's audio buffer fail (`bufferAppendingError`, "audio SourceBuffer error") — the player then
+  shows a spinner forever. Multichannel tracks are now downmixed to AAC stereo, which plays
+  reliably. Verified in a real WKWebView: 8-channel AAC produced the error immediately, stereo
+  buffered 32 s without a single error.
+
+  This also corrects the diagnosis of 1.5.33: the black pictures were not caused by 10-bit video.
+  The 10-bit conversion stays (it costs nothing for files that need it) but its bitrate now follows
+  the resolution (4K 25 Mbit, 1080p 10 Mbit instead of a flat 12 Mbit), so quality holds up.
+
 ## [1.5.33] — 2026-11-14
 
 ### Fixed

@@ -145,6 +145,16 @@ fn codec_key(codec: &str) -> &str {
 /// "Unsupported EC-3 in M2TS" - even when the platform could decode it. For live
 /// these have to be converted to AAC, otherwise the channel shows a spinner
 /// forever. (Measured on SRF 1 HD, which carries E-AC-3.)
+/// Can this audio track be copied into the remux untouched?
+///
+/// Two conditions: hls.js must be able to demux it, and the platform must decode it.
+/// Multichannel AAC (7.1 = 8 channels) makes WebKit's audio SourceBuffer fail with
+/// `bufferAppendingError` ("audio SourceBuffer error"), so anything above stereo is
+/// converted to AAC stereo - measured with a 4K film carrying 8-channel AAC.
+fn audio_copyable(codec: Option<&str>, channels: Option<i64>) -> bool {
+    hls_js_compatible_audio(codec) && channels.map(|c| c <= 2).unwrap_or(true)
+}
+
 fn hls_js_compatible_audio(codec: Option<&str>) -> bool {
     matches!(codec, Some("aac") | Some("mp3") | Some("opus") | Some("vorbis"))
 }
@@ -778,6 +788,10 @@ impl Remux {
             .and_then(|v| v.get("pix_fmt"))
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        let achannels = streams["audio"]
+            .get(audio_index.unwrap_or(0))
+            .and_then(|a| a.get("channels"))
+            .and_then(|c| c.as_i64());
         let (video_copy, audio_copy) = copy_actions(
             &vcodec,
             vprofile.as_deref(),
@@ -785,12 +799,14 @@ impl Remux {
             acodec.as_deref(),
             caps,
         );
+        let audio_copy = audio_copy && audio_copyable(acodec.as_deref(), achannels);
         let decision = json!({
             "key": key,
             "video_codec": vcodec,
             "video_profile": vprofile,
             "video": if video_copy { "copy" } else { "transcode" },
             "audio_codec": acodec,
+            "audio_channels": achannels,
             "audio": if audio_copy { "copy" } else { "transcode" },
             "segments": "mpegts",
             "probed": !caps.video.is_empty(),
@@ -843,17 +859,30 @@ impl Remux {
         if video_copy {
             cmd.arg("-c:v").arg("copy");
         } else if self.has_videotoolbox() {
-            // Hardware H.264: 4K 10-bit sources are otherwise far slower than
-            // realtime, which would make playback stall constantly.
+            // Hardware H.264: 10-bit sources are otherwise far slower than realtime,
+            // which would make playback stall. Bitrate follows the resolution so a
+            // 4K film does not end up looking like 1080p.
+            let height = streams["video"]
+                .get(0)
+                .and_then(|v| v.get("height"))
+                .and_then(|h| h.as_i64())
+                .unwrap_or(1080);
+            let (rate, max, buf) = if height >= 2000 {
+                ("25M", "35M", "50M")
+            } else if height >= 1000 {
+                ("10M", "14M", "20M")
+            } else {
+                ("5M", "7M", "10M")
+            };
             cmd.args([
                 "-c:v",
                 "h264_videotoolbox",
                 "-b:v",
-                "12M",
+                rate,
                 "-maxrate",
-                "16M",
+                max,
                 "-bufsize",
-                "24M",
+                buf,
                 "-pix_fmt",
                 "yuv420p",
             ]);
@@ -1144,6 +1173,17 @@ mod tests {
             (true, false)
         );
         assert!(!hls_js_compatible_audio(Some("eac3")));
+    }
+
+    /// 7.1 AAC kills WebKit's audio SourceBuffer; only up to stereo may be copied.
+    #[test]
+    fn multichannel_audio_is_downmixed() {
+        use super::audio_copyable;
+        assert!(audio_copyable(Some("aac"), Some(2)));
+        assert!(!audio_copyable(Some("aac"), Some(6)));
+        assert!(!audio_copyable(Some("aac"), Some(8)));
+        assert!(audio_copyable(Some("aac"), None));
+        assert!(!audio_copyable(Some("ac3"), Some(2)));
     }
 
     /// 10-bit video is reported as supported but renders black in WebKit's MSE.

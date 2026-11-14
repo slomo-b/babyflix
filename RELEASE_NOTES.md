@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.34
+
+- ▶️ **Films that only showed a spinner now play.** The cause was multichannel audio (6 or 8
+  channels) — it breaks the player's audio buffer. Those tracks are downmixed to stereo now. 15 of
+  your 29 downloads were affected, including the Hobbit films, Braveheart, Star Trek and South Park.
+- 🎚 The 10-bit conversion now uses a bitrate that fits the resolution (25 Mbit for 4K instead of 12),
+  so converted 4K films keep their quality.
+
 ## 🆕 What's new in 1.5.33
 
 - 🔊 **Sound for every download.** Films with AC-3 audio played mute — the format was passed through
