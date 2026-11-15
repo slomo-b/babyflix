@@ -312,7 +312,8 @@ export const api = {
     audio?: number,
     live?: boolean,
     seek?: number,
-    lang?: string
+    lang?: string,
+    transcode?: boolean
   ) => {
     const sp = new URLSearchParams({ kind, id });
     if (ext) sp.set("ext", ext);
@@ -320,8 +321,10 @@ export const api = {
     if (live) sp.set("live", "true");
     // Restart the remux at this second - how a jump beyond the prepared range works.
     if (seek != null && seek > 1) sp.set("seek", seek.toFixed(2));
-    // Preselect an audio track by language; saves a separate probe in the UI.
     if (lang) sp.set("lang", lang);
+    // Fallback: force a re-encode when a copied stream does not start.
+    if (transcode) sp.set("transcode", "true");
+    // (lang is set above, together with the transcode flag.)
     return req<{
       token: string;
       playlist: string;

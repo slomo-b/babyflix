@@ -981,6 +981,9 @@ struct RemuxQ {
     /// does not need its own probe just to preselect a track.
     #[serde(default)]
     lang: Option<String>,
+    /// Force a video re-encode (fallback when a copied stream does not start).
+    #[serde(default)]
+    transcode: Option<bool>,
 }
 
 async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> ApiResult {
@@ -1024,6 +1027,7 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         DecodeCaps::from_report(&report).unwrap_or_else(DecodeCaps::conservative)
     };
     let seek = q.seek.filter(|s| *s > 1.0);
+    let force_transcode = q.transcode.unwrap_or(false);
     // The seek offset is part of the key: a jump to a new position is a new
     // session, while a repeat of the same position reuses it.
     // "Automatic" is part of the key: a session started with the German track must
@@ -1033,19 +1037,21 @@ async fn remux_start(State(app): State<Arc<App>>, Query(q): Query<RemuxQ>) -> Ap
         .map(|a| a.to_string())
         .unwrap_or_else(|| format!("auto{}", q.lang.clone().unwrap_or_default()));
     let key = format!(
-        "{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}{}",
         q.kind,
         q.id,
         ext,
         audio_key,
-        seek.map(|s| s as u64).unwrap_or(0)
+        seek.map(|s| s as u64).unwrap_or(0),
+        if force_transcode { ":tc" } else { "" }
     );
     let audio = q.audio;
     let lang = q.lang.clone();
     let live = q.live.unwrap_or(false);
     let app2 = app.clone();
     let res = tokio::task::spawn_blocking(move || {
-        app2.remux.start(&key, &url, audio, lang.as_deref(), &caps, live, seek)
+        app2.remux
+            .start(&key, &url, audio, lang.as_deref(), &caps, live, seek, force_transcode)
     })
     .await
             .map_err(|e| ApiError(e.to_string()))?

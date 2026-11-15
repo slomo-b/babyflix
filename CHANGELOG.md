@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.35] — 2026-11-15
+
+### Fixed
+- **4K films stuttered every few seconds.** 1.5.34 re-encoded 10-bit video to H.264 — measured on the
+  affected film that took **118.8 s for 120 s of film (1.01× realtime)**, so the player ran into a
+  buffer underrun every few seconds. Copying the video instead needs **1.6 s for the same 120 s
+  (76× realtime)**, because the platform decodes HEVC Main 10 natively.
+
+  | | 120 s of film | speed |
+  |---|---|---|
+  | re-encode (1.5.34) | 118.8 s | 1.01× |
+  | copy (1.5.35) | 1.6 s | 76× |
+
+  The video is copied again. If a machine really cannot render a copied stream — nothing plays after
+  14 s, or a media error occurs — the player retries **once** with a re-encode instead of hanging.
+
 ## [1.5.34] — 2026-11-14
 
 ### Fixed

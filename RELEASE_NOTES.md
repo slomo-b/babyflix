@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.35
+
+- ⚡ **No more stuttering in 4K films.** Re-encoding 10-bit video ran at exactly realtime speed
+  (118.8 s for 120 s of film) — that caused a stall every few seconds. The video is copied again,
+  which is **76× faster**, because your Mac decodes it natively. If a stream still does not start, the
+  app retries once with a re-encode instead of hanging.
+
 ## 🆕 What's new in 1.5.34
 
 - ▶️ **Films that only showed a spinner now play.** The cause was multichannel audio (6 or 8

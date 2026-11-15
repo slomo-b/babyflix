@@ -140,6 +140,11 @@ export function Player() {
   const [remuxAudio, setRemuxAudio] = useState(0);
   const [forceRemux, setForceRemux] = useState(false);
   /**
+   * Video neu encodieren statt kopieren. Nur als Rueckfall: eine Kopie ist 76x
+   * schneller (gemessen), aber manche Geraete stellen 10-bit-HEVC nicht dar.
+   */
+  const [forceTranscode, setForceTranscode] = useState(false);
+  /**
    * Stream that had to be handed to FFmpeg because the panel only delivers raw
    * MPEG-TS for live. Keyed by stream, so a new channel starts with a direct
    * attempt again instead of inheriting the fallback.
@@ -225,6 +230,7 @@ export function Player() {
   useEffect(() => {
     setRemuxAudio(0);
     setForceRemux(false);
+    setForceTranscode(false);
     autoAudioRef.current = false;
     autoOffRef.current = false;
     setAutoOff(false);
@@ -405,6 +411,13 @@ export function Player() {
           hls.startLoad(video.currentTime > 1 ? video.currentTime : -1);
           return;
         }
+        // Prepared VOD that fails to decode: try a re-encode once before anything else.
+        if (isVod && remuxRef.current && !forceTranscode && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          setForceTranscode(true);
+          setLoading(true);
+          setSeekNonce((n) => n + 1);
+          return;
+        }
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 3 && !(isVod && remuxRef.current)) {
           hls.recoverMediaError();
           return;
@@ -433,7 +446,8 @@ export function Player() {
             autoAudio ? undefined : remuxAudio,
             liveRemux,
             seekAt > 1 ? seekAt : undefined,
-            autoAudio ? appLang : undefined
+            autoAudio ? appLang : undefined,
+            forceTranscode || undefined
           );
           autoAudioRef.current = true;
           if (cancelled) {
@@ -519,6 +533,20 @@ export function Player() {
     };
 
     startPlayback();
+
+    // A copied 10-bit stream can stay a black spinner on some machines. If nothing
+    // has played after 14 s, retry once with a re-encode instead of hanging.
+    let wd: number | null = null;
+    if (wantRemux && !forceTranscode) {
+      wd = window.setTimeout(() => {
+        wd = null;
+        if (cancelled) return;
+        if (video.currentTime > 0.5) return;
+        setForceTranscode(true);
+        setLoading(true);
+        setSeekNonce((n) => n + 1);
+      }, 14000);
+    }
 
     let endTimer: number | null = null;
     // Am Ende wird nicht mehr still weitergeschaltet: es kommt die Endkarte,
@@ -672,6 +700,7 @@ export function Player() {
       video.removeEventListener("timeupdate", onTime);
       video.removeEventListener("ended", onEnded);
       video.removeEventListener("error", onErr);
+      if (wd !== null) window.clearTimeout(wd);
       cleanup();
       video.removeAttribute("src");
       video.load();
@@ -679,7 +708,7 @@ export function Player() {
       if (sessionToken) api.remuxStop(sessionToken);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamKey, remuxAudio, forceRemux, liveRemuxFor, seekNonce, reloadKey]);
+  }, [streamKey, remuxAudio, forceRemux, forceTranscode, liveRemuxFor, seekNonce, reloadKey]);
 
   /**
    * Fehlt `current.next` (z.B. nach „Jetzt abspielen" oder nach einer
