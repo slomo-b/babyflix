@@ -4,6 +4,15 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.36
+
+- 🔊 **Proper sound.** Films were converted to 192 kbit stereo while playing — thin and flat on a 4K
+  film. The surround layout is kept now: **5.1 at 640 kbit** for converted tracks, original AAC
+  copied untouched, and only 7.1 is folded to 5.1 (8 channels break the player).
+- 🔍 **16 of your 44 downloads were affected:** the three Hobbits, Two Towers, Star Trek Into
+  Darkness, Ziemlich beste Freunde, Corpse Bride, Oliver & Co, Die Verurteilten and the South Park
+  episodes with AC-3.
+
 ## 🆕 What's new in 1.5.35
 
 - ⚡ **No more stuttering in 4K films.** Re-encoding 10-bit video ran at exactly realtime speed

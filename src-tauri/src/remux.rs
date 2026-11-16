@@ -157,7 +157,9 @@ fn codec_key(codec: &str) -> &str {
 /// `bufferAppendingError` ("audio SourceBuffer error"), so anything above stereo is
 /// converted to AAC stereo - measured with a 4K film carrying 8-channel AAC.
 fn audio_copyable(codec: Option<&str>, channels: Option<i64>) -> bool {
-    hls_js_compatible_audio(codec) && channels.map(|c| c <= 2).unwrap_or(true)
+    // Up to 5.1 (6 channels) appends fine in a real WKWebView; 7.1 (8 channels)
+    // fails with "audio SourceBuffer error" (measured).
+    hls_js_compatible_audio(codec) && channels.map(|c| c <= 6).unwrap_or(true)
 }
 
 fn hls_js_compatible_audio(codec: Option<&str>) -> bool {
@@ -902,7 +904,18 @@ impl Remux {
         if audio_copy {
             cmd.arg("-c:a").arg("copy");
         } else {
-            cmd.args(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
+            // Keep the source layout (up to 5.1) and use a bitrate that does not
+            // throw quality away: the old 192 kbit stereo was audibly poor on a
+            // 4K film. 7.1 is folded to 5.1 because 8 channels break the player.
+            let channels = achannels.unwrap_or(2).clamp(1, 6);
+            let rate = match channels {
+                1 => "128k",
+                2 => "320k",
+                _ => "640k",
+            };
+            cmd.arg("-c:a").arg("aac");
+            cmd.arg("-ac").arg(channels.to_string());
+            cmd.arg("-b:a").arg(rate);
         }
         cmd.arg("-sn");
         if live {
@@ -1185,12 +1198,13 @@ mod tests {
         assert!(!hls_js_compatible_audio(Some("eac3")));
     }
 
-    /// 7.1 AAC kills WebKit's audio SourceBuffer; only up to stereo may be copied.
+    /// 7.1 (8 channels) kills WebKit's audio SourceBuffer; 5.1 (6) is fine, so
+    /// surround is kept instead of collapsing everything to stereo.
     #[test]
-    fn multichannel_audio_is_downmixed() {
+    fn audio_up_to_51_is_kept() {
         use super::audio_copyable;
         assert!(audio_copyable(Some("aac"), Some(2)));
-        assert!(!audio_copyable(Some("aac"), Some(6)));
+        assert!(audio_copyable(Some("aac"), Some(6)));
         assert!(!audio_copyable(Some("aac"), Some(8)));
         assert!(audio_copyable(Some("aac"), None));
         assert!(!audio_copyable(Some("ac3"), Some(2)));

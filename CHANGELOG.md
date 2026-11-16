@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.36] — 2026-11-16
+
+### Changed
+- **Sound keeps its quality.** Preparing a film converted audio to 192 kbit **stereo** — audibly
+  poor on a 4K film. The audio now keeps its layout and gets a bitrate that does not throw anything
+  away:
+
+  - AAC up to 5.1 is **copied untouched** (measured: 6 channels append fine in a real WKWebView),
+  - AC-3/E-AC-3/DTS become **AAC 5.1 at 640 kbit** (stereo sources: 320 kbit),
+  - 7.1 (8 channels) is folded to 5.1 — 8 channels break the player's audio buffer.
+
+  Checked all 44 downloads: **16 were affected** by the old low-quality path, **28** already played
+  their original audio.
+
 ## [1.5.35] — 2026-11-15
 
 ### Fixed
