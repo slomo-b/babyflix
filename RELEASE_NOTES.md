@@ -4,6 +4,14 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.37
+
+- ⬇️ **Your downloads at a glance.** The bottom-left corner of the sidebar shows the three active
+  transfers with progress, how many more are queued, and whether anything is paused or failed.
+  Episodes are labelled with `S1 · E2`, so you can tell them apart. Clicking opens the Downloads page.
+- ⚡ **4K films that need converting no longer stutter.** The conversion now caps at 1080p with a fast
+  preset — measured at 2.3× realtime instead of 1.0×.
+
 ## 🆕 What's new in 1.5.36
 
 - 🔊 **Proper sound.** Films were converted to 192 kbit stereo while playing — thin and flat on a 4K

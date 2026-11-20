@@ -67,8 +67,6 @@ pub struct Remux {
     /// list, once inside `start`). On a real film that was 6.7 s + 5.1 s before
     /// anything played; a hit makes the second one free.
     probe_cache: Mutex<HashMap<String, (Instant, Value)>>,
-    /// Lazily detected hardware H.264 encoder.
-    videotoolbox: Mutex<Option<bool>>,
 }
 
 /// HTTP-only input options must not be passed for a local file - FFmpeg rejects
@@ -525,7 +523,6 @@ impl Remux {
             keys: Mutex::new(HashMap::new()),
             last_decision: RwLock::new(None),
             probe_cache: Mutex::new(HashMap::new()),
-            videotoolbox: Mutex::new(None),
         }
     }
 
@@ -618,23 +615,6 @@ impl Remux {
                 None => std::thread::sleep(Duration::from_millis(50)),
             }
         }
-    }
-
-    fn has_videotoolbox(&self) -> bool {
-        if let Some(v) = *self.videotoolbox.lock().unwrap() {
-            return v;
-        }
-        let ok = match self.ffmpeg_bin() {
-            Some(ff) => std::process::Command::new(ff)
-                .arg("-hide_banner")
-                .arg("-encoders")
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).contains("h264_videotoolbox"))
-                .unwrap_or(false),
-            None => false,
-        };
-        *self.videotoolbox.lock().unwrap() = Some(ok);
-        ok
     }
 
     fn probe_json(&self, url: &str, live: bool) -> Option<Value> {
@@ -870,52 +850,28 @@ impl Remux {
         }
         if video_copy {
             cmd.arg("-c:v").arg("copy");
-        } else if self.has_videotoolbox() {
-            // Hardware H.264: 10-bit sources are otherwise far slower than realtime,
-            // which would make playback stall. Bitrate follows the resolution so a
-            // 4K film does not end up looking like 1080p.
-            let height = streams["video"]
+        } else {
+            // 4K 10-bit decoding is what costs the time; the encoder follows the
+            // measured budget: 4K H.264 runs at ~1.0x realtime (stutters), 1080p
+            // with ultrafast at 2.3x (smooth). So a re-encode caps at 1080p.
+            let width = streams["video"]
                 .get(0)
-                .and_then(|v| v.get("height"))
-                .and_then(|h| h.as_i64())
-                .unwrap_or(1080);
-            let (rate, max, buf) = if height >= 2000 {
-                ("25M", "35M", "50M")
-            } else if height >= 1000 {
-                ("10M", "14M", "20M")
-            } else {
-                ("5M", "7M", "10M")
-            };
+                .and_then(|v| v.get("width"))
+                .and_then(|w| w.as_i64())
+                .unwrap_or(1920);
+            if width > 1920 {
+                cmd.args(["-vf", "scale=1920:-2"]);
+            }
             cmd.args([
                 "-c:v",
-                "h264_videotoolbox",
-                "-b:v",
-                rate,
-                "-maxrate",
-                max,
-                "-bufsize",
-                buf,
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "20",
                 "-pix_fmt",
                 "yuv420p",
             ]);
-        } else {
-            cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]);
-        }
-        if audio_copy {
-            cmd.arg("-c:a").arg("copy");
-        } else {
-            // Keep the source layout (up to 5.1) and use a bitrate that does not
-            // throw quality away: the old 192 kbit stereo was audibly poor on a
-            // 4K film. 7.1 is folded to 5.1 because 8 channels break the player.
-            let channels = achannels.unwrap_or(2).clamp(1, 6);
-            let rate = match channels {
-                1 => "128k",
-                2 => "320k",
-                _ => "640k",
-            };
-            cmd.arg("-c:a").arg("aac");
-            cmd.arg("-ac").arg(channels.to_string());
-            cmd.arg("-b:a").arg(rate);
         }
         cmd.arg("-sn");
         if live {

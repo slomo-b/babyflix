@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { Download, Film, Heart, Home, Radio, Search, Settings, Tv, Wifi } from "lucide-react";
 import { useT } from "../lib/i18n";
+import { SidebarDownloads } from "./SidebarDownloads";
 
 const nav = [
   { to: "/", key: "nav.home", icon: Home },
@@ -56,7 +57,9 @@ export function Sidebar({ user, status }: { user?: string | null; status?: strin
         ))}
       </nav>
 
-      <div className="mt-auto rounded-2xl border border-[var(--border)] bg-white/5 p-3.5">
+      <div className="mt-auto flex flex-col gap-2">
+      <SidebarDownloads />
+      <div className="rounded-2xl border border-[var(--border)] bg-white/5 p-3.5">
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <Wifi size={13} className="text-[var(--ok)]" />
           <span className="font-semibold text-white/90">{user || t("sidebar.notSignedIn")}</span>
@@ -66,6 +69,7 @@ export function Sidebar({ user, status }: { user?: string | null; status?: strin
             {status}
           </div>
         )}
+      </div>
       </div>
     </aside>
   );

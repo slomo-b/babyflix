@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.37] — 2026-11-20
+
+### Added
+- **Download activity in the sidebar.** The bottom-left corner shows the three active transfers with
+  their progress, how many more are queued, and whether anything is paused or failed. Series entries
+  are labelled with their episode (`S1 · E2 – …`) so they are distinguishable. Clicking opens the
+  Downloads page.
+
+### Fixed
+- **Re-encoded 4K films stuttered.** When a machine cannot play a copied 10-bit stream, the fallback
+  re-encoded at the source resolution — measured at **1.01× realtime**, so the buffer ran dry every
+  few seconds. The fallback now caps at **1080p with `libx264 -preset ultrafast`**, which runs at
+  **2.3× realtime** on the same machine.
+
 ## [1.5.36] — 2026-11-16
 
 ### Changed
