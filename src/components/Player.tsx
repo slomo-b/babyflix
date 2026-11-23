@@ -188,8 +188,12 @@ export function Player() {
    * trotzdem funktionieren.
    */
   const [inferredSeriesId, setInferredSeriesId] = useState<string | null>(null);
+  // A downloaded episode belongs to its series just like a streamed one; without
+  // this the end card never offers the next episode.
   const seriesId =
-    current?.kind === "series" ? (current.seriesId ?? inferredSeriesId ?? null) : null;
+    current?.kind === "series" || current?.kind === "local"
+      ? (current.seriesId ?? inferredSeriesId ?? null)
+      : null;
   const [endIn, setEndIn] = useState(0);
   const endTickRef = useRef<number | null>(null);
   const endInRef = useRef(0);
@@ -747,6 +751,49 @@ export function Player() {
   }, [current?.id, current?.next, seriesId]);
 
   /**
+   * Heruntergeladene Serien: die naechste Folge kommt aus den Downloads, damit sie
+   * offline laeuft - und zwar die naechste, die tatsaechlich vorhanden ist.
+   */
+  useEffect(() => {
+    const c = current;
+    if (!c || c.kind !== "local" || c.next) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { items } = await api.downloads();
+        const eps = items
+          .filter(
+            (i) =>
+              i.kind === "series" &&
+              i.state === "done" &&
+              (!c.seriesId || i.series_id === c.seriesId)
+          )
+          .sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
+        if (cancelled) return;
+        const i = eps.findIndex((e) => e.id === c.id);
+        const n = i >= 0 ? eps[i + 1] : undefined;
+        if (!n) return;
+        setResolvedNext({
+          kind: "local",
+          id: n.id,
+          ext: n.ext,
+          title: n.title,
+          subtitle: n.subtitle ?? undefined,
+          seriesId: n.series_id ?? c.seriesId,
+          sourceKind: "series",
+          sourceId: n.source_id,
+        });
+      } catch {
+        /* ohne Downloads bleibt es beim Folgenende */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, current?.kind, current?.seriesId]);
+
+  /**
    * Fehlt die Serien-ID im Auftrag (ältere Verlaufseinträge, „Weiterschauen"),
    * wird die Serie über den exakten Titel im Katalog gesucht. Ohne sie gäbe es
    * weder „Als Nächstes" noch die Zufallsfolge - und die Endkarte behauptete
@@ -810,6 +857,7 @@ export function Player() {
   const goNextNow = useCallback(() => {
     const nx = nextEp;
     if (!nx || !current) return;
+    const local = nx.kind === "local";
     play({
       kind: nx.kind,
       id: nx.id,
@@ -817,10 +865,13 @@ export function Player() {
       title: nx.title,
       subtitle: nx.subtitle,
       poster: current.poster,
-      historyKey: `${nx.kind}:${nx.id}`,
+      // Lokale Folgen teilen sich den Verlaufseintrag mit der gestreamten Fassung.
+      historyKey: local ? `series:${nx.sourceId ?? nx.id}` : `${nx.kind}:${nx.id}`,
+      sourceKind: local ? "series" : undefined,
+      sourceId: local ? nx.sourceId : undefined,
       // Ohne die Serien-ID ginge im nächsten Player die Zufallsfolge und die
       // Automatik verloren.
-      seriesId: current.seriesId,
+      seriesId: nx.seriesId ?? current.seriesId,
     });
   }, [current, nextEp, seriesId, play]);
 
@@ -860,9 +911,35 @@ export function Player() {
    */
   const playRandom = useCallback(async () => {
     const c = current;
-    if (!c || c.kind !== "series" || !seriesId || randomBusy) return;
+    if (!c || !seriesId || randomBusy) return;
     setRandomBusy(true);
     try {
+      if (c.kind === "local") {
+        const { items } = await api.downloads();
+        const pool = items.filter(
+          (i) =>
+            i.kind === "series" &&
+            i.state === "done" &&
+            i.id !== c.id &&
+            (!c.seriesId || i.series_id === c.seriesId)
+        );
+        if (!pool.length) return;
+        const n = pool[Math.floor(Math.random() * pool.length)];
+        cancelEnd();
+        play({
+          kind: "local",
+          id: n.id,
+          ext: n.ext,
+          title: n.title,
+          poster: n.poster ?? c.poster,
+          subtitle: n.subtitle ?? undefined,
+          historyKey: `series:${n.source_id}`,
+          sourceKind: "series",
+          sourceId: n.source_id,
+          seriesId: n.series_id ?? c.seriesId,
+        });
+        return;
+      }
       const d = await api.detail("series", seriesId);
       const all = (d.seasons ?? []).flatMap((s) =>
         (s.episodes ?? []).map((e) => ({ ...e, season: s.number }))
@@ -932,7 +1009,9 @@ export function Player() {
   /** Am Folgenende: Endkarte öffnen (mit Countdown, wenn die Automatik aktiv ist). */
   const openEndCard = useCallback(() => {
     if (!current || current.kind === "live" || endShownRef.current) return;
-    if (!nextEp && current.kind !== "series") return;
+    // Auch lokale Folgen bekommen die Endkarte ("Nochmal von vorne"), selbst wenn
+    // keine naechste Folge heruntergeladen ist.
+    if (!nextEp && current.kind !== "series" && current.kind !== "local") return;
     endShownRef.current = true;
     setEndMode(nextEp ? "next" : "done");
     if (nextEp && autoplayNext && !autoOffRef.current) {
@@ -1459,7 +1538,7 @@ export function Player() {
             <button className="btn btn-primary px-3 py-1.5 text-xs" onClick={goNextNow}>
               <Play size={14} fill="currentColor" /> {t("player.playNext")}
             </button>
-            {current.kind === "series" && seriesId && (
+            {(current.kind === "series" || current.kind === "local") && seriesId && (
               <button
                 className="btn btn-ghost px-3 py-1.5 text-xs"
                 onClick={() => void playRandom()}
@@ -1557,7 +1636,7 @@ export function Player() {
                   <RotateCcw size={16} /> {t("player.replay")}
                 </button>
               )}
-              {current.kind === "series" && seriesId && (
+              {(current.kind === "series" || current.kind === "local") && seriesId && (
                 <button
                   className="btn btn-ghost px-3 py-2 text-sm"
                   onClick={() => void playRandom()}

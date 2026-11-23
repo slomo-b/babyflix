@@ -7,6 +7,10 @@ export interface PlayNext {
   ext?: string;
   title: string;
   subtitle?: string;
+  /** Bei `local`: Quelle (Folge) fuer Verlauf und Serienkette. */
+  sourceKind?: "movie" | "series";
+  sourceId?: string;
+  seriesId?: string;
 }
 
 export interface PlayRequest {

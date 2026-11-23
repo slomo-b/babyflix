@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.38] — 2026-11-23
+
+### Fixed
+- **Downloaded series stopped at the end of an episode.** The player only treats `series` as part of
+  a series chain, and downloaded episodes are played as `local` — so there was no next episode, no
+  auto-play and no end card ("watch again"). Local episodes now belong to their series too:
+  - the next episode is taken from the **downloads** (so it plays offline) — the next one that is
+    actually available, in season/episode order,
+  - the end card and the automatic countdown work as they do when streaming,
+  - "random episode" picks from the downloaded episodes of that series,
+  - the history entry stays shared with the streamed version.
+
 ## [1.5.37] — 2026-11-20
 
 ### Added

@@ -4,6 +4,13 @@ A **Plex-like desktop streaming app** for movies, series and live TV — built o
 **Xtream Codes API** (plus **M3U** playlists) with **automatic posters** and **key-free IMDb
 ratings**. Native desktop app for **Windows, macOS and Linux** (Tauri 2 + React + Rust).
 
+## 🆕 What's new in 1.5.38
+
+- 📺 **Downloaded series continue by themselves.** At the end of an episode the next **downloaded**
+  episode is offered and starts automatically (with the countdown, as when streaming). If it is not
+  downloaded, the end card still appears — so you can watch again or close instead of being stuck.
+- 🎲 "Random episode" now picks from the episodes you actually have offline.
+
 ## 🆕 What's new in 1.5.37
 
 - ⬇️ **Your downloads at a glance.** The bottom-left corner of the sidebar shows the three active
